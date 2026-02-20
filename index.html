@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vigie FTTH - Validation des Comptes Rendus</title>
+    <title>Vigie VCR OK</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -61,7 +61,7 @@
             LayoutDashboard, LayoutGrid, CheckCircle2, ShieldCheck, BarChart3, BarChart2, PhoneIncoming, 
             Upload, FileUp, FileSpreadsheet, RefreshCw, Loader2, AlertTriangle, 
             Database, Download, X, Check, HelpCircle, Monitor, Clipboard, Eye,
-            Copy, FileWarning, Users, CheckCircle, Mail, RotateCcw, Bug, Wrench, 
+            FileWarning, Users, CheckCircle, RotateCcw, Bug, Wrench, 
             Camera, ClipboardCheck, TrendingUp, UploadCloud, Phone
         } from 'lucide-react';
 
@@ -901,7 +901,11 @@
             const correctionRows = stats.correctionStats.map(item => [item.installType, item.countPnd, item.motifsPnd?.join(', ') || '-', item.countApr, item.motifsApr?.join(', ') || '-', item.totalCor]);
             
             // Fix mapping for Dashboard view (already contains React elements for styling)
-            const topTagNcRowsDashboard = topTagsNC.map(item => [item.tagName, <span className="text-red-600 font-bold bg-red-50 px-2 py-1 rounded border border-red-100">{item.totalNC} NC</span>, <span className="text-slate-600 italic text-xs">{item.reasons?.join(', ')}</span>]);
+            const topTagNcRowsDashboard = topTagsNC.map(item => [
+                item.tagName, 
+                <span className="text-red-600 font-bold bg-red-50 px-2 py-1 rounded border border-red-100">{item.totalNC} NC</span>, 
+                <span className="text-slate-600 italic text-xs">{item.reasons?.join(', ')}</span>
+            ]);
             
             const ignoredRows = globalIgnored.map(item => [item.validator, <span className="text-red-600 font-bold">{item.tagAbsent > 0 ? item.tagAbsent : '-'}</span>, <span className="text-orange-600 font-bold">{item.tagMisplaced > 0 ? item.tagMisplaced : '-'}</span>, <span className="text-slate-400 italic">{item.emptyLine > 0 ? item.emptyLine : '-'}</span>, <span className="font-bold">{item.total}</span>]);
             
@@ -913,14 +917,9 @@
             
             const callRows = calls ? [['Appels Reçus', calls.offered], ['Appels traités', calls.answered], ['Appels Abandonnés', calls.abandoned], ['Appels abandonnés courts < 10s', calls.shortAbandoned], ['QS', `${calls.qs.toFixed(2)}%`], ['QS Nette (hors ABD court)', `${calls.qsNet.toFixed(2)}%`], ['DMR', formatSeconds(calls.dmr)], ['DMT', formatSeconds(calls.dmt)], ['Temps moyen MEA', formatSeconds(calls.mea)]] : [];
 
-            // Email styles
-            const EMAIL_STYLES = { table: { borderCollapse: 'collapse', width: '100%', fontFamily: 'Arial, sans-serif', fontSize: '13px', marginBottom: '15px' }, th: { border: '1px solid #d1d5db', backgroundColor: '#f3f4f6', padding: '8px', textAlign: 'left', fontSize: '12px', color: '#374151' }, td: { border: '1px solid #d1d5db', padding: '8px', color: '#111827' }, footerTd: { border: '1px solid #d1d5db', padding: '8px', fontWeight: 'bold', backgroundColor: '#f9fafb' }, qsCell: { border: '1px solid #d1d5db', padding: '8px', backgroundColor: '#d1fae5', color: '#065f46', fontWeight: 'bold' } };
-            const EmailHeatmapCell = ({ value, max, suffix = '', isZeroGreen = false }) => { if (value === 0 && isZeroGreen) return <span style={{ color: '#059669', fontWeight: 'bold' }}>0</span>; const ratio = max > 0 ? Math.min(value / max, 1) : 0; const backgroundColor = getHeatmapHex(ratio * 0.85); const color = ratio > 0.5 ? '#FFFFFF' : '#000000'; return <div style={{ backgroundColor, color, padding: '4px 8px', borderRadius: '4px', textAlign: 'center', display: 'inline-block', minWidth: '40px' }}>{value.toLocaleString('fr-FR', { maximumFractionDigits: 2 })}{suffix}</div>; };
-            const EmailTable = ({ headers, rows, footer }) => (<table style={EMAIL_STYLES.table} border={1} cellPadding={5} cellSpacing={0}><thead><tr>{headers.map((h, i) => <th key={i} style={EMAIL_STYLES.th}>{h}</th>)}</tr></thead><tbody>{rows.map((row, idx) => <tr key={idx}>{row.map((cell, cIdx) => <td key={cIdx} style={EMAIL_STYLES.td}>{cell}</td>)}</tr>)}</tbody>{footer && <tfoot><tr>{footer.map((f, i) => <td key={i} style={EMAIL_STYLES.footerTd}>{f}</td>)}</tr></tfoot>}</table>);
             
             const handleScreenshot = async () => { try { const element = document.getElementById('global-view-container'); if (!element) return; const dataUrl = await htmlToImage.toPng(element, { backgroundColor: '#ffffff', pixelRatio: 2 }); const link = document.createElement('a'); link.href = dataUrl; link.download = `Vigie_${selectedAgency}_${periodLabel}.png`; link.click(); } catch (e) { console.error(e); alert("Erreur capture."); } };
             const handleCopyImage = async () => { try { const element = document.getElementById('global-view-container'); if (!element) return; const blob = await htmlToImage.toBlob(element, { backgroundColor: '#ffffff', pixelRatio: 2 }); if (blob) navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => { setShowToast(true); setTimeout(() => setShowToast(false), 3000); }); } catch (e) { console.error(e); alert("Erreur copie."); } };
-            const copyToClipboard = () => { const el = document.getElementById('email-view-content'); if (!el) { alert("Allez sur l'onglet Email."); setActiveTab('email'); return; } const range = document.createRange(); range.selectNode(el); window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range); document.execCommand('copy'); window.getSelection()?.removeAllRanges(); setShowToast(true); setTimeout(() => setShowToast(false), 3000); };
             const collectRenderDiagnostics = () => { const container = document.getElementById('global-view-container'); const kpiCard = container?.querySelector('.dashboard-kpi-card'); const kpiValue = container?.querySelector('.kpi-value'); setVisualDiagnostics({ browser: { userAgent: navigator.userAgent, devicePixelRatio: window.devicePixelRatio, scrollY: window.scrollY, innerHeight: window.innerHeight }, container: container ? { width: container.offsetWidth, height: container.offsetHeight, offsetTop: container.offsetTop, rect: container.getBoundingClientRect() } : "Not Found" }); };
 
             const Toast = ({ message, onClose }) => <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-4"><div className="bg-slate-800 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3"><div className="bg-green-500 rounded-full p-1"><Check size={14} className="text-white" /></div><span className="font-medium text-sm">{message}</span></div></div>;
@@ -937,7 +936,6 @@
                         <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} icon={<BarChart2 size={16}/>} label="Synthèse TecNow" theme="tecnow" />
                         <TabButton active={activeTab === 'techs'} onClick={() => setActiveTab('techs')} icon={<Users size={16}/>} label="Techniciens" theme="tecnow" />
                         <TabButton active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} icon={<TrendingUp size={16}/>} label="Performance Agents" theme="danger" />
-                        <TabButton active={activeTab === 'email'} onClick={() => setActiveTab('email')} icon={<Mail size={16}/>} label="Email" />
                     </div>
 
                     <div className="bg-white rounded-b-xl rounded-tr-xl shadow-sm border border-slate-100 p-6 min-h-[400px]">
@@ -961,26 +959,10 @@
                         {activeTab === 'overview' && <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2"><div className="grid grid-cols-1 lg:grid-cols-2 gap-8"><div className="col-span-1 lg:col-span-2 border-t-4 border-emerald-500 rounded-lg shadow-sm"><AnalysisTable title="Répartition par Type (TecNow)" headers={['Type', 'Avec Contact (Vol/%)', 'Sans Contact (Vol/%)', 'Total (Vol/%)']} rows={mergedInstallTypeRows} footer={mergedInstallTypeFooter} /></div></div><div className="border-t-4 border-emerald-500 rounded-lg shadow-sm"><AnalysisTable title="Corrections & Sauvetages" headers={['Type', 'Nb PND', 'Motifs PND', 'Nb APR', 'Motifs APR', 'Total COR']} rows={correctionRows} /></div></div>}
                         {activeTab === 'techs' && <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2"><div className="grid grid-cols-1 lg:grid-cols-2 gap-8"><AnalysisTable title="Top 10 : Sans Contact" headers={['Technicien', 'Volume', 'Taux Indiv.', 'Taux Global']} rows={techSansContactRows} /><AnalysisTable title="Top 10 : Non-Conformités (NC)" headers={['Technicien', 'Volume NC', 'Taux Indiv.', 'Taux Global']} rows={techNcRows} /></div><div className="border-t-4 border-emerald-500 rounded-lg shadow-sm"><AnalysisTable title="Détails NC détectées sur 'Sans Contact'" headers={['Technicien', 'NC (Taux)', 'Motifs Principaux', 'OK (Taux)', 'Total Sans Contact']} rows={ncSansContactRows} /></div></div>}
                         {activeTab === 'performance' && <div className="animate-in fade-in slide-in-from-bottom-2 space-y-8"><div className="border-t-4 border-amber-500 rounded-lg shadow-sm bg-white"><div className="flex items-center gap-2 p-4 bg-amber-50 text-amber-800 border-b border-amber-100"><TrendingUp size={20} /><div><h3 className="font-bold">Performance des Agents (Validateurs)</h3><p className="text-xs text-amber-700 opacity-80">Données consolidées (toutes agences confondues)</p></div></div><AnalysisTable title="Volume de traitement & Répartition" headers={perfHeaders} rows={perfRows} /></div><div className="border-t-4 border-slate-400 rounded-lg shadow-sm bg-white opacity-90"><div className="flex items-center gap-2 p-4 bg-slate-50 text-slate-700 border-b border-slate-200"><FileWarning size={20} /><h3 className="font-bold">Détails des Rejets / Erreurs de format</h3><p className="text-xs text-slate-500 ml-auto">Données brutes, agences confondues</p></div><AnalysisTable title="Lignes ignorées par le système" headers={['Validateur', 'Tag Absent', 'Tag Mal Placé', 'Ligne Vide', 'Total']} rows={ignoredRows} /></div></div>}
-                        {activeTab === 'email' && (
-                            <div className="animate-in fade-in slide-in-from-bottom-2">
-                                <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg mb-4 text-sm text-blue-800 flex justify-between items-center"><span><strong>Aperçu Email Optimisé :</strong> Copiez le contenu ci-dessous.</span><button onClick={copyToClipboard} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow-sm text-sm font-medium transition-all"><Copy size={16} /> Copier</button></div>
-                                <div id="email-view-content" style={{ fontFamily: 'Arial, sans-serif', color: '#1f2937', padding: '20px', backgroundColor: '#ffffff' }}>
-                                    <p style={{marginBottom: '10px'}}>Bonjour,</p><p style={{marginBottom: '10px'}}>Je partage avec vous l'état de validation de la <strong>{periodLabel}</strong> :</p>
-                                    <p style={{fontWeight: 'bold', marginTop: '20px', marginBottom: '10px', textDecoration: 'underline'}}>· Performance file d’attente :</p>
-                                    {calls ? (<div style={{maxWidth: '400px', marginBottom: '20px'}}><div style={{fontWeight: 'bold', padding: '8px', border: '1px solid #d1d5db', backgroundColor: '#f3f4f6', textAlign: 'center'}}>Vigie Appel VCR {calls.agency} de la {periodLabel}</div><table style={{...EMAIL_STYLES.table, width: '100%'}} border={1} cellPadding={5} cellSpacing={0}><tbody>{emailCallRows.map((row, idx) => <tr key={idx}><td style={{...EMAIL_STYLES.td, fontWeight: 'bold'}}>{row[0]}</td><td style={{...EMAIL_STYLES.td, textAlign: 'right'}}>{row[1]}</td></tr>)}</tbody></table></div>) : (<p style={{color: '#9ca3af', fontStyle: 'italic', fontSize: '12px'}}>[Données Genesys non disponibles]</p>)}
-                                    <p style={{fontWeight: 'bold', marginTop: '20px', marginBottom: '10px', textDecoration: 'underline'}}>· Nombre de CRs SANS CONTACT :</p><EmailTable headers={['Type d\'installation', 'Avec Contact', 'Sans Contact', 'Total général']} rows={Object.entries(stats.byInstallType).map(([type, counts]) => [type, counts.with, <EmailHeatmapCell value={counts.without} max={maxSansContactCount} isZeroGreen={true} />, counts.total])} footer={['Total', stats.byContact.withContact, <span style={{color: stats.byContact.withoutContact > 0 ? '#dc2626' : '#059669', fontWeight: 'bold'}}>{stats.byContact.withoutContact}</span>, stats.totalInterventions]} /><EmailTable headers={['Type d\'installation', 'Avec Contact', 'Sans Contact', 'Total général']} rows={Object.entries(stats.byInstallType).map(([type, counts]) => [type, `${((counts.with/totalGlobal)*100).toFixed(2)}%`, <span style={{color: counts.without > 0 ? '#dc2626' : '#059669', fontWeight: 'bold'}}>{`${((counts.without/totalGlobal)*100).toFixed(2)}%`}</span>, `${((counts.total/totalGlobal)*100).toFixed(2)}%`])} />
-                                    <p style={{fontWeight: 'bold', marginTop: '20px', marginBottom: '10px', textDecoration: 'underline'}}>· NC par TECH (SANS CONTACT) :</p><EmailTable headers={['Technicien', 'Nombre', 'Taux Individuel', 'Taux Global']} rows={stats.techSansContactStats.map(item => [item.tech, item.targetCount, `${item.individualRate.toFixed(2)}%`, <EmailHeatmapCell value={item.globalRate} max={maxGlobalRateSansContact} suffix="%" />])} />
-                                    <p style={{fontWeight: 'bold', marginTop: '20px', marginBottom: '10px', textDecoration: 'underline'}}>· NC par TECH :</p><EmailTable headers={['Technicien', 'Nombre NC', 'Taux Individuel', 'Taux Global']} rows={stats.techNcStats.map(item => [item.tech, item.targetCount, `${item.individualRate.toFixed(2)}%`, <EmailHeatmapCell value={item.globalRate} max={maxGlobalRateNc} suffix="%" />])} />
-                                    <p style={{fontWeight: 'bold', marginTop: '20px', marginBottom: '10px', textDecoration: 'underline'}}>· NC détectée par Tech / Sans Contact :</p><EmailTable headers={['Technicien', 'NC (Taux)', 'Motifs NC', 'OK (Taux)', 'Total Sans Contact']} rows={stats.ncSansContactDetails.filter(item => item.countNC > 0).map(item => [item.tech, <span style={{color: '#dc2626', fontWeight: 'bold'}}>{item.countNC} <span style={{fontSize: '11px', fontWeight: 'normal', color: '#000'}}>({item.rateNC.toFixed(1)}%)</span></span>, <span style={{fontSize: '11px', fontStyle: 'italic', color: '#4b5563'}}>{item.topReasons.join(', ') || '-'}</span>, `${item.countOK} (${item.rateOK.toFixed(1)}%)`, item.total])} />
-                                    <p style={{fontWeight: 'bold', marginTop: '20px', marginBottom: '10px', textDecoration: 'underline'}}>· Nombre de CR NC OK sauvé par la CA ou après retour de l'agence :</p><EmailTable headers={['Type d\'installation', 'Nb COR PND', 'Motifs PND', 'Nb COR APR', 'Motifs APR', 'Total COR']} rows={stats.correctionStats.map(item => [item.installType, item.countPnd, item.motifsPnd?.join(', ') || '-', item.countApr, item.motifsApr?.join(', ') || '-', item.totalCor])} />
-                                    <p style={{fontWeight: 'bold', marginTop: '20px', marginBottom: '10px', textDecoration: 'underline'}}>· TOP 5 Types de Non-Conformités (Tags) :</p><EmailTable headers={['Tag', 'Volume', 'Détails / Motifs']} rows={topTagNcRows.map(r => [r[0], r[1], r[2]?.join(', ') || '-'])} />
-                                </div>
-                            </div>
-                        )}
                     </div>
                 </div>
             );
-        };
+        }
 
         const HeaderUploadButton = ({ label, subLabel, icon, isLoading, isLoaded, theme, onFileSelect, accept = ".csv,.xlsx,.xls" }) => {
             const fileInputRef = useRef(null);
