@@ -1,0 +1,1119 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vigie FTTH - Validation des Comptes Rendus</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: #f3f4f6;
+      }
+      /* Custom scrollbar for tables */
+      .scrollbar-thin::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      .scrollbar-thin::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .scrollbar-thin::-webkit-scrollbar-thumb {
+        background-color: #cbd5e1;
+        border-radius: 3px;
+      }
+    </style>
+    <!-- Babel for JSX transformation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <script type="importmap">
+{
+  "imports": {
+    "clsx": "https://esm.sh/clsx@^2.1.1",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "react": "https://esm.sh/react@18.2.0",
+    "lucide-react": "https://esm.sh/lucide-react@0.344.0",
+    "date-fns": "https://esm.sh/date-fns@2.30.0",
+    "date-fns/locale/fr": "https://esm.sh/date-fns@2.30.0/locale/fr",
+    "xlsx": "https://esm.sh/xlsx@0.18.5",
+    "html-to-image": "https://esm.sh/html-to-image@1.11.11",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "date-fns/": "https://esm.sh/date-fns@^4.1.0/"
+  }
+}
+</script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import clsx from 'clsx';
+        import * as XLSX from 'xlsx';
+        import { format, differenceInCalendarDays, startOfDay, getWeek, getMonth, isValid, parse } from 'date-fns';
+        import fr from 'date-fns/locale/fr';
+        import * as htmlToImage from 'html-to-image';
+        import { 
+            LayoutDashboard, LayoutGrid, CheckCircle2, ShieldCheck, BarChart3, BarChart2, PhoneIncoming, 
+            Upload, FileUp, FileSpreadsheet, RefreshCw, Loader2, AlertTriangle, 
+            Database, Download, X, Check, HelpCircle, Monitor, Clipboard, Eye,
+            Copy, FileWarning, Users, CheckCircle, Mail, RotateCcw, Bug, Wrench, 
+            Camera, ClipboardCheck, TrendingUp, UploadCloud, Phone
+        } from 'lucide-react';
+
+        // --- CONSTANTS ---
+
+        const EXPORT_COLUMNS_ORDER = [
+            'TYPE', 'STATUT VALIDATION', 'CONTACT', 'CHGT PRESTA', 'VALIDATION ROP', 'CHGT DESSERTE', 
+            'DÉCHETS PM', 'CADRAGE PM', 'RÉF JARR.', 'MESURE PM', 'PTO CONFORME', 'ÉTIQUETTE PTO', 
+            'SUSPICION FRAUDE', 'MESURE PTO AVANT', 'MESURE PTO', 'PHOTO PTO', 'CADRAGE PTO', 
+            'RÉF CABLE', 'RÉF PB', 'PHOTO PBO AVANT', 'PHOTO PBO APRÈS', 'CADRAGE PB', 'MESURE E2', 
+            'PÉNÉTRATION', 'GÉOLOCALISATION', 'CHECKVOISINAGE', 'VOISIN PERTURBÉ', 'INC', 'NACELLE', 'POTEAU'
+        ];
+
+        const DEPARTMENT_TO_AGENCY = {
+            '1': 'CTA', '01': 'CTA', '2': 'INE', '02': 'INE', '4': 'PACA', '04': 'PACA',
+            '5': 'PACA', '05': 'PACA', '6': 'PACA', '06': 'PACA', '7': 'CTA', '07': 'CTA',
+            '8': 'INE', '08': 'INE', '10': 'INE', '13': 'PACA', 
+            '16': 'SO',
+            '18': 'INE', '20': 'Corse', '2A': 'Corse', '2B': 'Corse', '21': 'CTA',
+            '30': 'SO', '31': 'SO', '32': 'SO', '33': 'SO', '34': 'SO',
+            '38': 'CTA', '39': 'CTA', '45': 'INE', 
+            '46': 'SO', '47': 'SO',
+            '51': 'INE', '52': 'INE', '54': 'INE', '55': 'INE', '57': 'INE', '58': 'CTA',
+            '59': 'INE', '60': 'INE', '69': 'CTA', '71': 'CTA', '73': 'CTA', '74': 'CTA',
+            '77': 'INE', 
+            '81': 'SO', '82': 'SO',
+            '83': 'PACA', 
+            '87': 'SO',
+            '88': 'INE', '89': 'INE', '93': 'INE', '94': 'INE',
+        };
+
+        const COLUMN_MATCHERS = {
+            id: ['id', 'reference', 'ref', 'number', 'numero'],
+            date: ['debut inter', 'u_datedebutinter', 'date_debut', 'planifie'], 
+            department: ['departement', 'dept', 'cp', 'zip', 'code_postal', 'u_dpt'],
+            technician: ['technicien', 'u_technicien'], 
+            comments: ['commentaire 2', 'u_commentaire_2', 'comments', 'resume'],
+            validator: ['closed by', 'ferme par', 'u_closed_by', 'cloture par', 'validateur'],
+            installTypeCA: ['type d\'installation validé par la ca', 'type d\'installation valide', 'type installation valide', 'type valide par la ca', 'u_type_install_valide']
+        };
+
+        const AGENCY_COLORS = {
+            'CTA': '#2563eb', // blue-600
+            'INE': '#9333ea', // purple-600
+            'PACA': '#f97316', // orange-500
+            'SO': '#0891b2', // cyan-600
+            'CORSE': '#dc2626', // red-600
+            'DEFAULT': '#374151' // slate-700
+        };
+
+        const getAgencyColor = (agency) => {
+            return AGENCY_COLORS[agency?.toUpperCase()] || AGENCY_COLORS.DEFAULT;
+        };
+
+        // --- UTILS : EXCEL PARSER ---
+
+        const parseFile = async (file) => {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = e.target?.result;
+                        const workbook = XLSX.read(data, { type: 'binary' });
+                        const firstSheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[firstSheetName];
+                        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+                        resolve(jsonData);
+                    } catch (error) {
+                        reject(error);
+                    }
+                };
+                reader.onerror = (error) => reject(error);
+                reader.readAsBinaryString(file);
+            });
+        };
+
+        // --- UTILS : DATA PROCESSING & HELPERS ---
+
+        const getHeatmapHex = (ratio) => {
+            const rSafe = Math.max(0, Math.min(1, ratio));
+            const start = { r: 255, g: 255, b: 255 };
+            const end = { r: 239, g: 68, b: 68 };
+            const r = Math.round(start.r + (end.r - start.r) * rSafe);
+            const g = Math.round(start.g + (end.g - start.g) * rSafe);
+            const b = Math.round(start.b + (end.b - start.b) * rSafe);
+            return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+        };
+
+        const formatSeconds = (seconds) => {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            return [h, m, s].map(v => v.toString().padStart(2, '0')).join(':');
+        };
+
+        const getPeriodLabel = (data) => {
+            if (!data || !data.length) return "Période Inconnue";
+
+            // Extract unique dates (ignoring time)
+            const dates = Array.from(new Set(data.map(d => startOfDay(d.date).getTime()))).sort();
+            
+            if (dates.length === 1) {
+                const date = new Date(dates[0]);
+                const today = startOfDay(new Date());
+                const diff = differenceInCalendarDays(today, date);
+                if (diff === 1) return "J-1";
+                return format(date, "dd/MM", { locale: fr });
+            }
+
+            // Check if multiple dates are within the same week
+            const weeks = new Set(data.map(d => d.week));
+            if (weeks.size === 1) {
+                return `S-${Array.from(weeks)[0]}`;
+            }
+
+            // Fallback to Month Name if multiple weeks
+            const months = new Set(data.map(d => d.month));
+            if (months.size === 1) {
+                return format(new Date(dates[0]), "MMMM", { locale: fr });
+            }
+
+            return "Période Multiple";
+        };
+
+        const normalizeStr = (str) => 
+            str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : "";
+
+        const findKey = (row, matchers) => {
+            const keys = Object.keys(row);
+            return keys.find(key => {
+                const kLow = key.toLowerCase();
+                const kNorm = normalizeStr(key);
+                return matchers.some(m => {
+                    const mLow = m.toLowerCase();
+                    const mNorm = normalizeStr(m);
+                    return kLow.includes(mLow) || kNorm.includes(mNorm);
+                });
+            });
+        };
+
+        const CALL_MATCHERS = {
+            queueName: ['nom de la file', 'nom file', 'queue name'],
+            offered: ['offre', 'appels recus', 'reçus', 'recus', 'presentes'],
+            answered: ['reponse', 'réponse', 'rÃ©ponse', 'appels traites', 'traités', 'traites', 'servis'],
+            abandoned: ['abandon', 'perdus'],
+            short: ['abandons courts', 'court', '< 10', 'dissuade'],
+            dmr: ['asa', 'vitesse', 'dmr', 'temps de reponse'],
+            dmt: ['moy. traitement', 'dmt', 'duree moy'],
+            mea: ['temps moyen de mise en attente', 'mise en attente', 'mea']
+        };
+
+        const parseFlexibleDuration = (val) => {
+            if (val === null || val === undefined || val === '') return 0;
+            if (typeof val === 'number') {
+                if (val < 100) return Math.round(val * 86400); 
+                if (val > 5000) return Math.round(val / 1000); 
+                return Math.round(val);
+            }
+            const strVal = String(val).trim();
+            if (strVal === '-' || strVal === '') return 0;
+            if (/[hms]/.test(strVal) && !/:/.test(strVal)) {
+                let totalSeconds = 0;
+                const h = strVal.match(/(\d+)\s*h/i);
+                const m = strVal.match(/(\d+)\s*m/i);
+                const s = strVal.match(/(\d+)\s*s/i);
+                if (h) totalSeconds += parseInt(h[1]) * 3600;
+                if (m) totalSeconds += parseInt(m[1]) * 60;
+                if (s) totalSeconds += parseInt(s[1]);
+                return totalSeconds;
+            }
+            if (strVal.includes(':')) {
+                const parts = strVal.split(':').map(p => parseFloat(p));
+                if (parts.length === 3) return (parts[0] * 3600) + (parts[1] * 60) + parts[2];
+                if (parts.length === 2) return (parts[0] * 60) + parts[1];
+            }
+            const floatVal = parseFloat(strVal.replace(',', '.'));
+            if (!isNaN(floatVal)) {
+                if (floatVal < 1) return Math.round(floatVal * 86400);
+                return Math.round(floatVal);
+            }
+            return 0;
+        };
+
+        const parseFlexibleNumber = (val, isRatio = false) => {
+            if (val === null || val === undefined || val === '') return 0;
+            if (typeof val === 'number') {
+                if (isRatio && val <= 1 && val > 0) return val * 100; 
+                return val;
+            }
+            let strVal = String(val).replace(',', '.').replace('%', '').trim();
+            if (strVal === '-') return 0;
+            const floatVal = parseFloat(strVal);
+            if (isNaN(floatVal)) return 0;
+            if (isRatio && floatVal <= 1 && floatVal > 0 && !String(val).includes('%')) {
+                return floatVal * 100;
+            }
+            return floatVal;
+        };
+
+        const parseCommentData = (raw) => {
+            if (!raw) return {};
+            const match = raw.match(/\[\[([\s\S]*?)\]\]/);
+            if (!match) return {}; 
+            const content = match[1];
+            // Split by single backslash (escaped in JS string as \\)
+            const values = content.split('\\');
+            const data = {};
+            EXPORT_COLUMNS_ORDER.forEach((header, index) => {
+                data[header] = values[index] !== undefined ? values[index].trim() : 'NA';
+            });
+            return data;
+        };
+
+        const identifyNCReason = (parsedData, isCorrectionContext = false) => {
+            const IGNORED_COLS = ['TYPE', 'STATUT VALIDATION', 'CONTACT', 'CHGT PRESTA', 'VALIDATION ROP', 'CHGT DESSERTE'];
+            const OK_VALUES = ['1', 'OK', 'NA', 'RAS', 'CONFORME', 'YES', 'OUI', '', '-', 'N/A', '0 (RAS)', '1 (RAS)', '2'];
+            const formatReason = (key, val) => {
+                const reasonMatch = val.match(/\((.*?)\)/);
+                if (reasonMatch && reasonMatch[1] && reasonMatch[1].trim().length > 0) {
+                    const comment = reasonMatch[1].trim();
+                    if (['RAS', 'OK', 'CONFORME', 'NA'].includes(comment.toUpperCase())) return key;
+                    return `${key} (${comment})`;
+                }
+                return key;
+            };
+            for (const [key, val] of Object.entries(parsedData)) {
+                if (IGNORED_COLS.includes(key)) continue;
+                const vUpper = val.toUpperCase().trim();
+                if (vUpper.startsWith('COR') || vUpper.startsWith('0') || vUpper === 'NC' || vUpper === 'KO') {
+                    return formatReason(key, val);
+                }
+            }
+            if (isCorrectionContext) {
+                for (const [key, val] of Object.entries(parsedData)) {
+                    if (IGNORED_COLS.includes(key)) continue;
+                    const vClean = val.trim();
+                    const vUpper = vClean.toUpperCase();
+                    if (vClean.length > 0 && !OK_VALUES.includes(vUpper)) return formatReason(key, val);
+                }
+            }
+            if (parsedData['SUSPICION FRAUDE'] && !OK_VALUES.includes(parsedData['SUSPICION FRAUDE'].toUpperCase())) return 'SUSPICION FRAUDE';
+            if (parsedData['RACC SAUVAGE'] && !OK_VALUES.includes(parsedData['RACC SAUVAGE'].toUpperCase())) return 'RACC SAUVAGE';
+            return undefined;
+        };
+
+        const normalizeData = (rawData) => {
+            if (rawData.length === 0) return [];
+            const firstRow = rawData[0];
+            const map = {
+                id: findKey(firstRow, COLUMN_MATCHERS.id),
+                date: findKey(firstRow, COLUMN_MATCHERS.date),
+                dept: findKey(firstRow, COLUMN_MATCHERS.department),
+                tech: findKey(firstRow, COLUMN_MATCHERS.technician),
+                comments: findKey(firstRow, COLUMN_MATCHERS.comments),
+                validator: findKey(firstRow, COLUMN_MATCHERS.validator),
+                installTypeCA: findKey(firstRow, COLUMN_MATCHERS.installTypeCA),
+            };
+
+            return rawData.map((row, index) => {
+                const id = map.id ? String(row[map.id]) : `ROW-${index}`;
+                let date = new Date();
+                const dateVal = map.date ? row[map.date] : null;
+                if (dateVal) {
+                    if (typeof dateVal === 'number') {
+                        date = new Date((dateVal - (25567 + 2)) * 86400 * 1000);
+                    } else if (typeof dateVal === 'string') {
+                        let cleanDate = dateVal.trim();
+                        const d1 = parse(cleanDate, 'dd/MM/yyyy HH:mm:ss', new Date());
+                        const d2 = parse(cleanDate, 'dd/MM/yyyy', new Date());
+                        const d3 = parse(cleanDate, 'yyyy-MM-dd', new Date());
+                        if (isValid(d1)) date = d1;
+                        else if (isValid(d2)) date = d2;
+                        else if (isValid(d3)) date = d3;
+                        else {
+                            const d4 = new Date(cleanDate);
+                            if (isValid(d4)) date = d4;
+                        }
+                    }
+                }
+
+                let dept = map.dept ? String(row[map.dept]).trim() : '99';
+                const deptMatch = dept.match(/(\d+)/);
+                if (deptMatch) dept = deptMatch[0];
+                let agency = 'Unknown';
+                const padDept = dept.padStart(2, '0');
+                const unpadDept = String(parseInt(dept, 10));
+                if (DEPARTMENT_TO_AGENCY[dept]) agency = DEPARTMENT_TO_AGENCY[dept];
+                else if (DEPARTMENT_TO_AGENCY[padDept]) agency = DEPARTMENT_TO_AGENCY[padDept];
+                else if (DEPARTMENT_TO_AGENCY[unpadDept]) agency = DEPARTMENT_TO_AGENCY[unpadDept];
+
+                const technician = map.tech ? String(row[map.tech]).trim() : 'Unknown';
+                const validator = map.validator ? String(row[map.validator]).trim() : 'System';
+                const rawComment = map.comments ? String(row[map.comments]).trim() : '';
+                
+                let ignoreReason = 'VALID';
+                let parsedData = {};
+
+                if (rawComment === '') ignoreReason = 'EMPTY';
+                else if (rawComment.includes('[[')) {
+                    parsedData = parseCommentData(rawComment);
+                    if (rawComment.startsWith('[[')) {
+                        if (Object.keys(parsedData).length === 0) ignoreReason = 'TAG_ABSENT';
+                        else ignoreReason = 'VALID';
+                    } else ignoreReason = 'TAG_MISPLACED';
+                } else ignoreReason = 'TAG_ABSENT';
+
+                const isIgnored = ignoreReason !== 'VALID';
+                let installType = 'Inconnu';
+                if (map.installTypeCA && row[map.installTypeCA]) {
+                    const caValue = String(row[map.installTypeCA]).trim();
+                    if (caValue.length > 0) installType = caValue;
+                }
+                if (installType === 'Inconnu' && parsedData['TYPE'] && parsedData['TYPE'] !== 'NA') installType = parsedData['TYPE'];
+
+                let contactStatus = 'Avec Contact';
+                const contactVal = parsedData['CONTACT'] ? parsedData['CONTACT'].toUpperCase() : '';
+                if (contactVal.includes('NON') || contactVal.includes('SANS') || contactVal === '0') contactStatus = 'Sans Contact';
+
+                const validationStatus = parsedData['STATUT VALIDATION'] ? parsedData['STATUT VALIDATION'].toUpperCase() : 'INCONNU';
+                let status = 'INCONNU';
+                if (validationStatus.includes('CONF')) status = 'OK';
+                else if (validationStatus.includes('COR')) status = 'OK';
+                else if (validationStatus.includes('NC') || validationStatus.includes('KO')) status = 'NC';
+
+                let ncReason = undefined;
+                if (status === 'NC' || validationStatus.includes('COR')) ncReason = identifyNCReason(parsedData, validationStatus.includes('COR'));
+
+                const extractedFields = {};
+                EXPORT_COLUMNS_ORDER.forEach(col => { extractedFields[col] = parsedData[col] || ''; });
+
+                return {
+                    id, date, week: getWeek(date, { weekStartsOn: 1 }), month: getMonth(date) + 1,
+                    department: dept, agency, technician, validator, status, validationStatus,
+                    installType, contactStatus, ncReason, isIgnored, ignoreReason, originalRow: row, extractedFields
+                };
+            }).filter(i => i.agency !== 'Unknown' || i.validator !== 'System');
+        };
+
+        const normalizeCallData = (rawData, selectedAgency = 'INE') => {
+            if (rawData.length === 0) return [];
+            const firstRow = rawData[0];
+            const colQueue = findKey(firstRow, CALL_MATCHERS.queueName);
+            const colOffre = findKey(firstRow, CALL_MATCHERS.offered);
+            const colReponse = findKey(firstRow, CALL_MATCHERS.answered);
+            const colAbandon = findKey(firstRow, CALL_MATCHERS.abandoned);
+            const colCourt = findKey(firstRow, CALL_MATCHERS.short);
+            const colDmr = findKey(firstRow, CALL_MATCHERS.dmr);
+            const colDmt = findKey(firstRow, CALL_MATCHERS.dmt);
+            const colMea = findKey(firstRow, CALL_MATCHERS.mea);
+
+            let totalOffered = 0, totalAnswered = 0, totalAbandon = 0, totalShort = 0;
+            let totalDmrWeighted = 0, totalDmtWeighted = 0, totalMeaWeighted = 0, countRows = 0;
+            const selectedAgencyUpper = selectedAgency.toUpperCase();
+
+            rawData.forEach(row => {
+                if (colQueue && selectedAgency) {
+                    const queueName = String(row[colQueue]).toUpperCase();
+                    let isAgencyMatch = false;
+                    if (selectedAgencyUpper === 'PACA' || selectedAgencyUpper === 'CORSE') {
+                        if (queueName.includes('PACA') || queueName.includes('CORSE')) isAgencyMatch = true;
+                    } else if (selectedAgencyUpper === 'SO') {
+                        // Accept both SO and MED for SO agency
+                        if (queueName.includes('SO') || queueName.includes('MED')) isAgencyMatch = true;
+                    } else {
+                        if (queueName.includes(selectedAgencyUpper)) isAgencyMatch = true;
+                    }
+                    if (!isAgencyMatch) return;
+                }
+                const off = parseFlexibleNumber(row[colOffre]);
+                const ans = parseFlexibleNumber(row[colReponse]);
+                const abd = parseFlexibleNumber(row[colAbandon]);
+                const sh = parseFlexibleNumber(row[colCourt]);
+                const dmr = parseFlexibleDuration(row[colDmr]);
+                const dmt = parseFlexibleDuration(row[colDmt]);
+                const mea = parseFlexibleDuration(row[colMea]);
+
+                totalOffered += off; totalAnswered += ans; totalAbandon += abd; totalShort += sh;
+                const weight = ans > 0 ? ans : (off > 0 ? off : 1);
+                totalDmrWeighted += dmr * weight; totalDmtWeighted += dmt * weight; totalMeaWeighted += mea * weight;
+                countRows++;
+            });
+
+            if (totalOffered === 0 && countRows === 0) return [];
+            const qs = totalOffered > 0 ? (totalAnswered / totalOffered) * 100 : 0;
+            const validOffered = Math.max(0, totalOffered - totalShort);
+            const qsNet = validOffered > 0 ? (totalAnswered / validOffered) * 100 : 0;
+            const totalWeight = totalAnswered > 0 ? totalAnswered : (totalOffered > 0 ? totalOffered : countRows);
+            
+            return [{
+                agency: selectedAgency, offered: totalOffered, answered: totalAnswered,
+                abandoned: totalAbandon, shortAbandoned: totalShort, qs, qsNet,
+                dmr: totalWeight > 0 ? totalDmrWeighted / totalWeight : 0,
+                dmt: totalWeight > 0 ? totalDmtWeighted / totalWeight : 0,
+                mea: totalWeight > 0 ? totalMeaWeighted / totalWeight : 0,
+            }];
+        };
+
+        const getCallFileDebugInfo = (rawData, selectedAgency) => {
+            if (!rawData || rawData.length === 0) return { error: "Fichier vide" };
+            const firstRow = rawData[0];
+            const columnsFound = {};
+            const columnsMissing = [];
+            Object.entries(CALL_MATCHERS).forEach(([key, matchers]) => {
+                const found = findKey(firstRow, matchers);
+                if (found) columnsFound[key] = found; else columnsMissing.push(key);
+            });
+            const colQueue = columnsFound.queueName;
+            let matchingRows = 0, agencyMismatchCount = 0;
+            const firstFiveRows = rawData.slice(0, 5).map(r => ({
+                queue: colQueue ? r[colQueue] : 'N/A', offered: columnsFound.offered ? r[columnsFound.offered] : 'N/A', matched: false, reason: ''
+            }));
+            const selectedAgencyUpper = selectedAgency.toUpperCase();
+            rawData.forEach((row, idx) => {
+                let isAgencyMatch = true;
+                if (colQueue && selectedAgency) {
+                    const q = String(row[colQueue]).toUpperCase();
+                    let strictMatch = false;
+                    if (selectedAgencyUpper === 'PACA' || selectedAgencyUpper === 'CORSE') {
+                        if (q.includes('PACA') || q.includes('CORSE')) strictMatch = true;
+                    } else if (selectedAgencyUpper === 'SO') {
+                        if (q.includes('SO') || q.includes('MED')) strictMatch = true;
+                    } else {
+                        if (q.includes(selectedAgencyUpper)) strictMatch = true;
+                    }
+                    if (!strictMatch) isAgencyMatch = false;
+                }
+                if (!isAgencyMatch) agencyMismatchCount++;
+                if (isAgencyMatch) matchingRows++;
+                if (idx < 5) {
+                    firstFiveRows[idx].matched = isAgencyMatch;
+                    if (!isAgencyMatch) firstFiveRows[idx].reason = `Agence '${row[colQueue]}' != '${selectedAgency}' (PACA/CORSE/SO handled)`;
+                    else firstFiveRows[idx].reason = 'OK';
+                }
+            });
+            return { totalRows: rawData.length, headers: Object.keys(firstRow), columnsFound, columnsMissing, selectedAgency, matchingRows, agencyMismatchCount, sampleData: firstFiveRows };
+        };
+
+        const calculateGlobalValidatorStats = (data) => {
+            const map = new Map();
+            const typesSet = new Set();
+            data.forEach(item => {
+                if (!map.has(item.validator)) map.set(item.validator, { validator: item.validator, totalCases: 0, withContact: 0, withoutContact: 0, typesBreakdown: {} });
+                const stat = map.get(item.validator);
+                stat.totalCases++;
+                if (item.contactStatus === 'Avec Contact') stat.withContact++; else stat.withoutContact++;
+                let type = 'Non Tagué';
+                if (item.extractedFields && item.extractedFields['TYPE'] && item.extractedFields['TYPE'] !== 'NA' && item.extractedFields['TYPE'] !== '') type = item.extractedFields['TYPE'];
+                if (!stat.typesBreakdown[type]) stat.typesBreakdown[type] = 0;
+                stat.typesBreakdown[type]++;
+                typesSet.add(type);
+            });
+            return { stats: Array.from(map.values()).sort((a, b) => b.totalCases - a.totalCases), allTypes: Array.from(typesSet).sort() };
+        };
+
+        const calculateGlobalIgnoredStats = (data) => {
+            const map = new Map();
+            data.forEach(item => {
+                if (item.isIgnored) {
+                    if (!map.has(item.validator)) map.set(item.validator, { validator: item.validator, tagAbsent: 0, tagMisplaced: 0, emptyLine: 0, total: 0 });
+                    const stat = map.get(item.validator);
+                    stat.total++;
+                    if (item.ignoreReason === 'EMPTY') stat.emptyLine++;
+                    else if (item.ignoreReason === 'TAG_ABSENT') stat.tagAbsent++;
+                    else if (item.ignoreReason === 'TAG_MISPLACED') stat.tagMisplaced++;
+                }
+            });
+            return Array.from(map.values()).sort((a, b) => b.total - a.total);
+        };
+
+        // NEW: Calculate Top 5 NC Tags
+        const calculateGlobalTagNCs = (data, selectedAgency) => {
+            const map = new Map();
+            const EXCEPTION_TAGS = ['INC', 'VOISIN PERTURBÉ', 'VOISIN PERTURBE']; 
+            
+            data.forEach(item => {
+                if (item.isIgnored) return;
+                if (selectedAgency && item.agency !== selectedAgency) return;
+                Object.entries(item.extractedFields).forEach(([tagName, val]) => {
+                    const upperVal = val.trim().toUpperCase();
+                    if (!upperVal || upperVal === 'NA' || upperVal === '-') return;
+                    let isNC = false;
+                    let comment = '';
+                    if (EXCEPTION_TAGS.includes(tagName)) {
+                        if (['OUI', 'YES', '1'].includes(upperVal)) {
+                            isNC = true;
+                            const match = val.match(/\((.*?)\)/);
+                            if (match) comment = match[1].trim();
+                        }
+                    } else {
+                        if (upperVal.startsWith('0')) {
+                            isNC = true;
+                            const match = val.match(/\((.*?)\)/);
+                            if (match) comment = match[1].trim();
+                        }
+                    }
+                    if (isNC) {
+                        if (!map.has(tagName)) map.set(tagName, { count: 0, reasonsMap: new Map() });
+                        const entry = map.get(tagName);
+                        entry.count++;
+                        if (comment) {
+                            const cleanComment = comment.charAt(0).toUpperCase() + comment.slice(1).toLowerCase();
+                            entry.reasonsMap.set(cleanComment, (entry.reasonsMap.get(cleanComment) || 0) + 1);
+                        }
+                    }
+                });
+            });
+
+            const result = [];
+            map.forEach((value, key) => {
+                const sortedReasons = Array.from(value.reasonsMap.entries())
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([reason, count]) => `${reason} (${count})`);
+                result.push({ tagName: key, totalNC: value.count, reasons: sortedReasons });
+            });
+            return result.sort((a, b) => b.totalNC - a.totalNC).slice(0, 5);
+        };
+
+        const aggregateStats = (data, agencyName, callDataRaw) => {
+            const filtered = data.filter(d => d.agency === agencyName);
+            let callStats = undefined;
+            if (callDataRaw && callDataRaw.length > 0) {
+                const normalizedCalls = normalizeCallData(callDataRaw, agencyName);
+                if (normalizedCalls.length > 0) callStats = normalizedCalls[0];
+            }
+
+            const stats = {
+                agencyName, totalInterventions: 0, callStats, 
+                byContact: { withContact: 0, withoutContact: 0 }, byInstallType: {},
+                techSansContactStats: [], totalSansContact: 0, nbTechsWithSansContact: 0,
+                techNcStats: [], totalNC: 0, nbTechsWithNc: 0, ncSansContactDetails: [],
+                correctionStats: [], totalCorrections: 0, nbTechsWithCorrection: 0, ignoredLines: []
+            };
+
+            const ignoredStatsMap = new Map();
+            const techMap = new Map();
+            const installTypeMap = new Map();
+            const correctionMap = new Map();
+
+            filtered.forEach(item => {
+                if (item.isIgnored) {
+                    if (!ignoredStatsMap.has(item.validator)) ignoredStatsMap.set(item.validator, { validator: item.validator, tagAbsent: 0, tagMisplaced: 0, emptyLine: 0, total: 0 });
+                    const stat = ignoredStatsMap.get(item.validator);
+                    stat.total++;
+                    if (item.ignoreReason === 'EMPTY') stat.emptyLine++; else if (item.ignoreReason === 'TAG_ABSENT') stat.tagAbsent++; else if (item.ignoreReason === 'TAG_MISPLACED') stat.tagMisplaced++;
+                    return;
+                }
+                stats.totalInterventions++;
+                if (item.contactStatus === 'Avec Contact') stats.byContact.withContact++; else stats.byContact.withoutContact++;
+
+                if (!installTypeMap.has(item.installType)) installTypeMap.set(item.installType, { with: 0, without: 0, total: 0 });
+                const typeStat = installTypeMap.get(item.installType);
+                typeStat.total++;
+                if (item.contactStatus === 'Avec Contact') typeStat.with++; else typeStat.without++;
+
+                if (!techMap.has(item.technician)) techMap.set(item.technician, { total: 0, sansContact: 0, nc: 0, sansContactNc: 0, sansContactOk: 0, ncReasons: new Set(), correction: 0 });
+                const tStat = techMap.get(item.technician);
+                tStat.total++;
+
+                if (item.contactStatus === 'Sans Contact') { tStat.sansContact++; stats.totalSansContact++; }
+
+                const isStrictNC = item.validationStatus.includes('NC') || item.validationStatus.includes('KO');
+                if (isStrictNC) { tStat.nc++; stats.totalNC++; }
+
+                const isOk = item.validationStatus.includes('CONF') || item.validationStatus.includes('COR');
+                if (item.contactStatus === 'Sans Contact') {
+                    if (isStrictNC) { tStat.sansContactNc++; if (item.ncReason) tStat.ncReasons.add(item.ncReason); }
+                    else if (isOk) tStat.sansContactOk++;
+                }
+
+                const isCorPnd = item.validationStatus.includes('COR PND');
+                const isCorApr = item.validationStatus.includes('COR APR');
+                if (isCorPnd || isCorApr) {
+                    stats.totalCorrections++; tStat.correction++; 
+                    if (!correctionMap.has(item.installType)) correctionMap.set(item.installType, { pnd: 0, pndReasons: new Set(), apr: 0, aprReasons: new Set() });
+                    const cStat = correctionMap.get(item.installType);
+                    const reason = item.ncReason || 'Inconnu';
+                    if (isCorPnd) { cStat.pnd++; if (reason) cStat.pndReasons.add(reason); }
+                    if (isCorApr) { cStat.apr++; if (reason) cStat.aprReasons.add(reason); }
+                }
+            });
+
+            stats.byInstallType = Object.fromEntries(installTypeMap);
+            const techValues = Array.from(techMap.values());
+            stats.nbTechsWithCorrection = techValues.filter(t => t.correction > 0).length;
+            stats.nbTechsWithNc = techValues.filter(t => t.nc > 0).length;
+            stats.nbTechsWithSansContact = techValues.filter(t => t.sansContact > 0).length;
+            
+            stats.techSansContactStats = Array.from(techMap.entries()).filter(([_, val]) => val.sansContact > 0).map(([tech, val]) => ({
+                tech, totalInterventions: val.total, targetCount: val.sansContact,
+                individualRate: (val.sansContact / val.total) * 100, globalRate: stats.totalSansContact > 0 ? (val.sansContact / stats.totalSansContact) * 100 : 0
+            })).sort((a, b) => b.targetCount - a.targetCount).slice(0, 10); 
+
+            stats.techNcStats = Array.from(techMap.entries()).filter(([_, val]) => val.nc > 0).map(([tech, val]) => ({
+                tech, totalInterventions: val.total, targetCount: val.nc,
+                individualRate: (val.nc / val.total) * 100, globalRate: stats.totalNC > 0 ? (val.nc / stats.totalNC) * 100 : 0
+            })).sort((a, b) => b.targetCount - a.targetCount).slice(0, 10);
+
+            stats.ncSansContactDetails = Array.from(techMap.entries()).filter(([_, val]) => val.sansContact > 0).map(([tech, val]) => {
+                const totalSubset = val.sansContact; 
+                return {
+                    tech, countNC: val.sansContactNc, rateNC: totalSubset > 0 ? (val.sansContactNc / totalSubset) * 100 : 0,
+                    topReasons: Array.from(val.ncReasons), countOK: val.sansContactOk, rateOK: totalSubset > 0 ? (val.sansContactOk / totalSubset) * 100 : 0, total: totalSubset
+                };
+            }).sort((a, b) => b.total - a.total);
+
+            stats.correctionStats = Array.from(correctionMap.entries()).map(([type, val]) => ({
+                installType: type, countPnd: val.pnd, motifsPnd: Array.from(val.pndReasons), countApr: val.apr, motifsApr: Array.from(val.aprReasons), totalCor: val.pnd + val.apr
+            })).sort((a, b) => b.totalCor - a.totalCor);
+
+            stats.ignoredLines = Array.from(ignoredStatsMap.values()).sort((a, b) => b.total - a.total);
+
+            return stats;
+        };
+
+        // --- COMPONENTS ---
+
+        const FileUpload = ({ onFileSelect, isLoading }) => {
+            const handleDrop = useCallback((e) => {
+                e.preventDefault();
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) onFileSelect(e.dataTransfer.files[0]);
+            }, [onFileSelect]);
+            const handleChange = (e) => {
+                if (e.target.files && e.target.files[0]) onFileSelect(e.target.files[0]);
+            };
+            return (
+                <div 
+                  className={clsx("group w-full max-w-2xl mx-auto p-12 border-2 border-dashed rounded-2xl transition-all duration-300 ease-in-out text-center cursor-pointer bg-white relative overflow-hidden", isLoading ? "opacity-60 cursor-wait border-slate-200" : "border-slate-300 hover:border-blue-500 hover:bg-blue-50/30 hover:shadow-lg hover:-translate-y-1")}
+                  onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}
+                >
+                  <input type="file" id="fileInput" className="hidden" accept=".csv,.xlsx,.xls" onChange={handleChange} disabled={isLoading} />
+                  <label htmlFor="fileInput" className="cursor-pointer flex flex-col items-center justify-center relative z-10">
+                    {isLoading ? (
+                      <div className="flex flex-col items-center"><div className="animate-spin rounded-full h-12 w-12 border-4 border-slate-200 border-t-blue-600 mb-4"></div><p className="text-blue-600 font-medium animate-pulse">Lecture du fichier en cours...</p></div>
+                    ) : (
+                      <><div className="bg-blue-100/50 p-4 rounded-full mb-6 group-hover:scale-110 transition-transform duration-300"><UploadCloud className="w-12 h-12 text-blue-600" /></div><h3 className="text-2xl font-bold text-slate-800 mb-2">Glissez votre fichier ici</h3><p className="text-slate-500 mb-8 max-w-sm mx-auto">Ou cliquez pour parcourir vos dossiers. Supporte Excel (.xlsx) et CSV.</p><div className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 rounded-lg text-xs font-semibold text-slate-600 uppercase tracking-wide"><FileSpreadsheet className="w-4 h-4" /> Extraction Interventions</div></>
+                    )}
+                  </label>
+                </div>
+            );
+        };
+
+        const AnalysisTable = ({ title, headers, rows, footer }) => (
+            <div className="w-full flex flex-col rounded-xl border border-slate-200 overflow-hidden bg-white shadow-sm">
+                {title && <div className="px-5 py-3 bg-slate-50 border-b border-slate-200"><h4 className="font-semibold text-slate-800 text-sm tracking-wide">{title}</h4></div>}
+                <div className="overflow-x-auto overflow-y-auto max-h-[500px] scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+                    <table className="w-full text-sm text-left border-collapse">
+                        <thead className="text-xs text-slate-500 uppercase bg-white sticky top-0 z-10 shadow-sm">
+                            <tr>{headers.map((h, i) => <th key={i} className="px-5 py-3 font-semibold border-b border-slate-100 tracking-wider whitespace-nowrap bg-slate-50/80 backdrop-blur-sm">{h}</th>)}</tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {rows.length > 0 ? rows.map((row, idx) => <tr key={idx} className="hover:bg-slate-50/50 transition-colors">{row.map((cell, cIdx) => <td key={cIdx} className="px-5 py-3 text-slate-600 whitespace-nowrap">{cell}</td>)}</tr>) : <tr><td colSpan={headers.length} className="px-5 py-8 text-center text-slate-400 italic bg-slate-50/30">Aucune donnée disponible pour cette sélection.</td></tr>}
+                        </tbody>
+                        {footer && <tfoot className="bg-slate-50 font-bold text-slate-800 border-t-2 border-slate-100 sticky bottom-0 z-10"><tr>{footer.map((f, i) => <td key={i} className="px-5 py-3 whitespace-nowrap shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">{f}</td>)}</tr></tfoot>}
+                    </table>
+                </div>
+            </div>
+        );
+
+        const BugIcon = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+              <rect width="8" height="14" x="8" y="6" rx="4" />
+              <path d="m19 7-3 2" /><path d="m5 7 3 2" />
+              <path d="m19 19-3-2" /><path d="m5 19 3-2" />
+              <path d="M20 13h-4" /><path d="M4 13h4" />
+              <path d="m10 4 1 2" /><path d="m14 4-1 2" />
+            </svg>
+        );
+
+        const DebugPanel = ({ callDataRaw, selectedAgency, visualDiagnostics, onClose }) => {
+            const [activeTab, setActiveTab] = useState(callDataRaw ? 'data' : 'render');
+            const debugInfo = useMemo(() => {
+                if (!callDataRaw) return null;
+                return getCallFileDebugInfo(callDataRaw, selectedAgency);
+            }, [callDataRaw, selectedAgency]);
+            const handleCopyDiagnostics = () => {
+                if (visualDiagnostics) {
+                    navigator.clipboard.writeText(JSON.stringify(visualDiagnostics, null, 2));
+                    alert("Rapport technique copié !");
+                }
+            };
+            return (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+                        <div className="bg-slate-800 text-white px-6 py-4 flex justify-between items-center shrink-0">
+                            <div><h2 className="text-lg font-bold flex items-center gap-2"><BugIcon className="text-yellow-400 w-6 h-6" /> Panneau de Diagnostic</h2><p className="text-xs text-slate-300">Analyse technique des données et du rendu</p></div>
+                            <button onClick={onClose} className="hover:bg-slate-700 p-2 rounded-full transition-colors"><X size={20} /></button>
+                        </div>
+                        <div className="flex border-b border-slate-200">
+                            {callDataRaw && <button onClick={() => setActiveTab('data')} className={`px-6 py-3 text-sm font-medium ${activeTab === 'data' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>Données Appels</button>}
+                            <button onClick={() => setActiveTab('render')} className={`px-6 py-3 text-sm font-medium ${activeTab === 'render' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-slate-500 hover:text-slate-700'}`}>Rendu & Visuel</button>
+                        </div>
+                        <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                            {activeTab === 'data' && debugInfo && (
+                                <><div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200"><div className="text-xs text-slate-500 uppercase font-bold">Lignes Totales</div><div className="text-2xl font-bold text-slate-800">{debugInfo.totalRows}</div></div>
+                                    <div className={`p-4 rounded-lg border ${debugInfo.matchingRows > 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}><div className={`text-xs uppercase font-bold ${debugInfo.matchingRows > 0 ? 'text-green-600' : 'text-red-600'}`}>Lignes Conservées (Match)</div><div className={`text-2xl font-bold ${debugInfo.matchingRows > 0 ? 'text-green-800' : 'text-red-800'}`}>{debugInfo.matchingRows}</div></div>
+                                    <div className="bg-orange-50 p-4 rounded-lg border border-orange-200"><div className="text-xs text-orange-600 uppercase font-bold">Lignes Rejetées</div><div className="text-sm mt-1 text-orange-800 font-medium">Agence incorrecte: {debugInfo.agencyMismatchCount}</div></div>
+                                </div>
+                                <div><h3 className="font-bold text-slate-800 mb-3 border-b pb-2">Détection des Colonnes</h3><div className="grid grid-cols-2 md:grid-cols-3 gap-3">{Object.entries(debugInfo.columnsFound || {}).map(([key, colName]) => <div key={key} className="flex items-center gap-2 text-sm bg-green-50 px-3 py-2 rounded border border-green-100"><Check size={14} className="text-green-600 shrink-0" /><div className="truncate"><span className="font-semibold text-slate-700 capitalize">{key}:</span> <span className="text-slate-500 italic">"{colName}"</span></div></div>)}{debugInfo.columnsMissing?.map((key) => <div key={key} className="flex items-center gap-2 text-sm bg-red-50 px-3 py-2 rounded border border-red-100"><X size={14} className="text-red-600 shrink-0" /><span className="font-semibold text-red-700 capitalize">{key} (Introuvable)</span></div>)}</div></div>
+                                <div><h3 className="font-bold text-slate-800 mb-3 border-b pb-2">Analyse des 5 premières lignes</h3><div className="overflow-x-auto"><table className="w-full text-xs text-left"><thead className="bg-slate-100 text-slate-600 uppercase"><tr><th className="px-3 py-2">Filtre (Agence)</th><th className="px-3 py-2">Col. Agence (Queue)</th><th className="px-3 py-2">Statut</th></tr></thead><tbody className="divide-y divide-slate-100">{debugInfo.sampleData?.map((row, i) => <tr key={i} className={row.matched ? 'bg-green-50/50' : 'bg-red-50/50'}><td className="px-3 py-2 font-mono">{selectedAgency}</td><td className="px-3 py-2 font-mono text-slate-700">"{row.queue}"</td><td className="px-3 py-2">{row.matched ? <span className="flex items-center gap-1 text-green-700 font-bold"><Check size={12}/> OK</span> : <span className="flex items-center gap-1 text-red-600 font-medium"><X size={12}/> {row.reason}</span>}</td></tr>)}</tbody></table></div></div></>
+                            )}
+                            {activeTab === 'render' && (
+                                <div className="space-y-4">
+                                    <div className="bg-purple-50 p-4 rounded-lg border border-purple-200 flex justify-between items-start"><div><h3 className="text-purple-900 font-bold flex items-center gap-2"><Monitor size={18}/> Diagnostic de Rendu (Screenshot)</h3><p className="text-sm text-purple-700 mt-1">Copiez ces informations et envoyez-les au développeur pour corriger les problèmes de décalage d'image.</p></div><button onClick={handleCopyDiagnostics} className="bg-purple-600 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-purple-700"><Clipboard size={16}/> Copier le rapport</button></div>
+                                    <div className="relative"><pre className="bg-slate-900 text-slate-200 p-4 rounded-lg text-xs font-mono overflow-auto max-h-[400px] border border-slate-700 shadow-inner">{visualDiagnostics ? JSON.stringify(visualDiagnostics, null, 2) : "// Aucune donnée de diagnostic disponible.\n// Veuillez fermer ce panneau, puis cliquer sur l'icône 'Insecte' pour rafraîchir."}</pre></div>
+                                </div>
+                            )}
+                        </div>
+                        <div className="p-4 bg-slate-50 border-t flex justify-end"><button onClick={onClose} className="bg-slate-800 text-white px-6 py-2 rounded-lg font-medium hover:bg-slate-900">Fermer</button></div>
+                    </div>
+                </div>
+            );
+        };
+
+        const Dashboard = ({ data, callData, selectedAgency, onBack }) => {
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [showToast, setShowToast] = useState(false);
+            const [showDebug, setShowDebug] = useState(false);
+            const [visualDiagnostics, setVisualDiagnostics] = useState(null);
+
+            const stats = useMemo(() => aggregateStats(data, selectedAgency, callData || []), [data, callData, selectedAgency]);
+            const globalPerf = useMemo(() => calculateGlobalValidatorStats(data), [data]);
+            const globalIgnored = useMemo(() => calculateGlobalIgnoredStats(data), [data]);
+            const topTagsNC = useMemo(() => calculateGlobalTagNCs(data, selectedAgency), [data, selectedAgency]);
+
+            const totalGlobal = stats.totalInterventions || 1; 
+            const periodLabel = useMemo(() => getPeriodLabel(data.filter(d => d.agency === selectedAgency)), [data, selectedAgency]);
+
+            const maxSansContactCount = Math.max(...Object.values(stats.byInstallType).map(v => v.without), 1);
+            const maxGlobalRateSansContact = Math.max(...stats.techSansContactStats.map(i => i.globalRate), 0.1);
+            const maxGlobalRateNc = Math.max(...stats.techNcStats.map(i => i.globalRate), 0.1);
+            const percentSansContact = ((stats.byContact.withoutContact / totalGlobal) * 100).toFixed(1);
+            const percentNC = ((stats.totalNC / totalGlobal) * 100).toFixed(1); 
+            const qualityService = (100 - (stats.totalNC / totalGlobal * 100)).toFixed(2);
+            const calls = stats.callStats;
+            
+            const getQsColor = (val) => {
+                if (val >= 95) return { color: "bg-emerald-400", label: "Excellent" };
+                if (val >= 93) return { color: "bg-lime-400", label: "Bon" };
+                if (val >= 90) return { color: "bg-yellow-400", label: "Moyen" };
+                return { color: "bg-red-500", label: "Critique" };
+            };
+            let qsIndicator = "bg-slate-300", qsLabel = "-", qsNetIndicator = "bg-slate-300", qsNetLabel = "-";
+            if (calls) {
+                const qsObj = getQsColor(calls.qs); qsIndicator = qsObj.color; qsLabel = qsObj.label;
+                const qsNetObj = getQsColor(calls.qsNet); qsNetIndicator = qsNetObj.color; qsNetLabel = qsNetObj.label;
+            }
+
+            // ... Helper components for Dashboard ...
+            const DashboardKpi = ({ title, value, subtext, theme, statusIndicator }) => {
+                const themes = { genesys: "bg-gradient-to-br from-orange-500 to-orange-600 text-white shadow-orange-200", tecnow: "bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-emerald-200" };
+                return (
+                    <div className={`flex-1 min-w-[140px] h-full min-h-[110px] rounded-xl shadow-lg p-3 flex flex-col justify-center gap-2 items-center text-center ${themes[theme]} transition-transform hover:scale-[1.02] duration-200 border border-white/10 relative overflow-hidden dashboard-kpi-card`}>
+                        {statusIndicator && <div className={`absolute top-2 right-2 w-3 h-3 rounded-full ${statusIndicator} shadow-sm ring-2 ring-white/30`} title="Indicateur Qualité"></div>}
+                        <p className="text-[10px] font-bold uppercase tracking-wide opacity-90 leading-tight">{title}</p>
+                        <h3 className="text-xl md:text-2xl font-extrabold tracking-tight drop-shadow-sm whitespace-nowrap leading-normal kpi-value">{value}</h3>
+                        <div className="text-[9px] font-medium bg-black/20 px-2 py-0.5 rounded-full border border-white/10 truncate max-w-full">{subtext}</div>
+                    </div>
+                );
+            };
+
+            const StackedHorizontalBarChart = ({ data }) => {
+                const maxTotal = Math.max(...data.map(d => d.total), 1);
+                return (
+                    <div className="flex flex-col gap-3 w-full">
+                        {data.map((item, idx) => {
+                            const widthPercent = (item.total / maxTotal) * 100;
+                            const withPercent = item.total > 0 ? (item.withContact / item.total) * 100 : 0;
+                            const withoutPercent = item.total > 0 ? (item.withoutContact / item.total) * 100 : 0;
+                            return (
+                                <div key={idx} className="flex items-center gap-3 text-sm group">
+                                    <div className="w-32 font-bold text-slate-700 shrink-0 truncate text-right" title={item.label}>{item.label}</div>
+                                    <div className="flex-1 h-8 bg-slate-50 rounded-lg overflow-hidden flex relative shadow-inner border border-slate-100">
+                                         <div style={{ width: `${Math.max(widthPercent, 1)}%` }} className="flex h-full rounded-r-lg overflow-hidden transition-all duration-500 ease-out">
+                                            {item.withContact > 0 && <div style={{ width: `${withPercent}%` }} className="bg-emerald-400 h-full flex items-center justify-center text-emerald-950 text-xs font-bold relative group/segment" title={`Avec Contact: ${item.withContact}`}>{withPercent > 10 && <span className="drop-shadow-sm">{item.withContact}</span>}</div>}
+                                            {item.withoutContact > 0 && <div style={{ width: `${withoutPercent}%` }} className="bg-orange-400 h-full flex items-center justify-center text-orange-950 text-xs font-bold relative group/segment" title={`Sans Contact: ${item.withoutContact}`}>{withoutPercent > 10 && <span className="drop-shadow-sm">{item.withoutContact}</span>}</div>}
+                                         </div>
+                                    </div>
+                                    <div className="w-12 text-left font-bold text-slate-800 shrink-0">{item.total}</div>
+                                </div>
+                            );
+                        })}
+                         <div className="flex justify-end gap-4 mt-2 text-xs font-medium text-slate-500"><div className="flex items-center gap-1"><div className="w-3 h-3 bg-emerald-400 rounded-sm"></div> Avec Contact</div><div className="flex items-center gap-1"><div className="w-3 h-3 bg-orange-400 rounded-sm"></div> Sans Contact</div></div>
+                    </div>
+                );
+            };
+
+            const HorizontalBarRow = ({ label, value, max, rank, colorClass = "bg-orange-500", shadowClass = "shadow-[0_0_10px_rgba(249,115,22,0.4)]" }) => {
+                const width = max > 0 ? (value / max) * 100 : 0;
+                return (
+                    <div className="flex items-center gap-3 mb-3">
+                        <span className="text-xs font-bold text-slate-400 w-4">#{rank}</span><span className="text-xs font-medium text-slate-700 w-32 truncate" title={label}>{label}</span>
+                        <div className="flex-1 h-3 bg-slate-100 rounded-full overflow-hidden"><div style={{ width: `${width}%` }} className={`h-full rounded-full ${colorClass} ${shadowClass}`}></div></div>
+                        <span className="text-xs font-bold text-slate-700 w-8 text-right">{value}</span>
+                    </div>
+                );
+            };
+
+            const HeatmapCell = ({ value, max, suffix = '', isZeroGreen = false }) => {
+                if (value === 0 && isZeroGreen) return <div className="text-emerald-600 font-bold bg-emerald-50 px-2 py-1 rounded inline-block">0{suffix}</div>;
+                const ratio = max > 0 ? Math.min(value / max, 1) : 0;
+                const backgroundColor = `rgba(239, 68, 68, ${ratio * 0.85})`;
+                const color = ratio > 0.5 ? 'white' : 'inherit';
+                return <div className="-mx-4 -my-3 px-4 py-3 h-full flex items-center" style={{ backgroundColor, color, fontWeight: ratio > 0.5 ? '600' : '500' }}>{value.toLocaleString('fr-FR', { maximumFractionDigits: 2 })}{suffix}</div>;
+            };
+
+            const formatSeconds = (seconds) => {
+                const h = Math.floor(seconds / 3600);
+                const m = Math.floor((seconds % 3600) / 60);
+                const s = Math.floor(seconds % 60);
+                return [h, m, s].map(v => v.toString().padStart(2, '0')).join(':');
+            };
+
+            const TabButton = ({ active, onClick, icon, label, theme = 'neutral', className }) => {
+                let activeClass = 'border-blue-600 text-blue-700 bg-blue-50/50';
+                if (theme === 'genesys') activeClass = 'border-orange-500 text-orange-700 bg-orange-50/50';
+                if (theme === 'tecnow') activeClass = 'border-emerald-500 text-emerald-700 bg-emerald-50/50';
+                if (theme === 'danger') activeClass = 'border-amber-500 text-amber-700 bg-amber-50/50';
+                return <button onClick={onClick} className={`flex items-center gap-2 px-5 py-3 text-sm font-medium rounded-t-lg border-b-2 transition-all duration-200 ${active ? activeClass : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'} ${className || ''}`}>{icon}{label}</button>;
+            };
+
+            const SectionHeader = ({ icon, title, theme }) => (
+                <div className={`flex items-center gap-2 mb-4 pb-2 border-b ${theme === 'genesys' ? 'border-orange-100' : 'border-emerald-100'}`}>
+                    <div className={`p-1.5 rounded-lg ${theme === 'genesys' ? 'bg-orange-100 text-orange-600' : 'bg-emerald-100 text-emerald-600'}`}>{icon}</div>
+                    <h3 className={`font-bold text-lg ${theme === 'genesys' ? 'text-orange-900' : 'text-emerald-900'}`}>{title}</h3>
+                </div>
+            );
+
+            // Data prep
+            const chartStackedData = Object.entries(stats.byInstallType).map(([type, val]) => ({ label: type, withContact: val.with, withoutContact: val.without, total: val.total })).sort((a, b) => b.total - a.total);
+            const mergedInstallTypeRows = Object.entries(stats.byInstallType).map(([type, counts]) => [type, `${counts.with} (${counts.total > 0 ? ((counts.with/counts.total)*100).toFixed(1) : 0}%)`, <HeatmapCell value={counts.without} max={maxSansContactCount} isZeroGreen={true} suffix={` (${counts.total > 0 ? ((counts.without/counts.total)*100).toFixed(1) : 0}%)`} />, `${counts.total} (100%)`]);
+            const mergedInstallTypeFooter = ['Total Général', `${stats.byContact.withContact} (${((stats.byContact.withContact / totalGlobal) * 100).toFixed(1)}%)`, <span className={stats.byContact.withoutContact > 0 ? "text-red-600 font-bold" : "text-green-600 font-bold"}>{stats.byContact.withoutContact} ({percentSansContact}%)</span>, stats.totalInterventions];
+            
+            const techSansContactRows = stats.techSansContactStats.map(item => [item.tech, item.targetCount, `${item.individualRate.toFixed(2)}%`, <HeatmapCell value={item.globalRate} max={maxGlobalRateSansContact} suffix="%" />]);
+            const techNcRows = stats.techNcStats.map(item => [item.tech, item.targetCount, `${item.individualRate.toFixed(2)}%`, <HeatmapCell value={item.globalRate} max={maxGlobalRateNc} suffix="%" />]);
+            const ncSansContactRows = stats.ncSansContactDetails.filter(item => item.countNC > 0).map(item => [item.tech, <span className="text-red-600 font-bold bg-red-50 px-2 py-1 rounded">{item.countNC} <span className="text-xs font-normal">({item.rateNC.toFixed(1)}%)</span></span>, <span className="text-xs text-slate-600 italic block max-w-xs">{item.topReasons.join(', ') || '-'}</span>, `${item.countOK} (${item.rateOK.toFixed(1)}%)`, item.total]);
+            const correctionRows = stats.correctionStats.map(item => [item.installType, item.countPnd, item.motifsPnd?.join(', ') || '-', item.countApr, item.motifsApr?.join(', ') || '-', item.totalCor]);
+            
+            // Fix mapping for Dashboard view (already contains React elements for styling)
+            const topTagNcRowsDashboard = topTagsNC.map(item => [item.tagName, <span className="text-red-600 font-bold bg-red-50 px-2 py-1 rounded border border-red-100">{item.totalNC} NC</span>, <span className="text-slate-600 italic text-xs">{item.reasons?.join(', ')}</span>]);
+            
+            const ignoredRows = globalIgnored.map(item => [item.validator, <span className="text-red-600 font-bold">{item.tagAbsent > 0 ? item.tagAbsent : '-'}</span>, <span className="text-orange-600 font-bold">{item.tagMisplaced > 0 ? item.tagMisplaced : '-'}</span>, <span className="text-slate-400 italic">{item.emptyLine > 0 ? item.emptyLine : '-'}</span>, <span className="font-bold">{item.total}</span>]);
+            
+            const preferredOrder = ['Non Tagué', 'RACC', 'PLP', 'E2', 'E3'];
+            const otherTypes = globalPerf.allTypes.filter(t => !preferredOrder.includes(t));
+            const displayTypes = [...preferredOrder, ...otherTypes];
+            const perfHeaders = ['Validateur', 'Total Cas', 'Avec Contact', 'Sans Contact', ...displayTypes];
+            const perfRows = globalPerf.stats.map(s => [s.validator, <span className="font-bold">{s.totalCases}</span>, <span className="text-green-600 font-medium">{s.withContact}</span>, <span className="text-orange-600 font-medium">{s.withoutContact}</span>, ...displayTypes.map(t => s.typesBreakdown[t] || 0).map(val => val === 0 ? <span className="text-slate-300">-</span> : val)]);
+            
+            const callRows = calls ? [['Appels Reçus', calls.offered], ['Appels traités', calls.answered], ['Appels Abandonnés', calls.abandoned], ['Appels abandonnés courts < 10s', calls.shortAbandoned], ['QS', `${calls.qs.toFixed(2)}%`], ['QS Nette (hors ABD court)', `${calls.qsNet.toFixed(2)}%`], ['DMR', formatSeconds(calls.dmr)], ['DMT', formatSeconds(calls.dmt)], ['Temps moyen MEA', formatSeconds(calls.mea)]] : [];
+
+            // Email styles
+            const EMAIL_STYLES = { table: { borderCollapse: 'collapse', width: '100%', fontFamily: 'Arial, sans-serif', fontSize: '13px', marginBottom: '15px' }, th: { border: '1px solid #d1d5db', backgroundColor: '#f3f4f6', padding: '8px', textAlign: 'left', fontSize: '12px', color: '#374151' }, td: { border: '1px solid #d1d5db', padding: '8px', color: '#111827' }, footerTd: { border: '1px solid #d1d5db', padding: '8px', fontWeight: 'bold', backgroundColor: '#f9fafb' }, qsCell: { border: '1px solid #d1d5db', padding: '8px', backgroundColor: '#d1fae5', color: '#065f46', fontWeight: 'bold' } };
+            const EmailHeatmapCell = ({ value, max, suffix = '', isZeroGreen = false }) => { if (value === 0 && isZeroGreen) return <span style={{ color: '#059669', fontWeight: 'bold' }}>0</span>; const ratio = max > 0 ? Math.min(value / max, 1) : 0; const backgroundColor = getHeatmapHex(ratio * 0.85); const color = ratio > 0.5 ? '#FFFFFF' : '#000000'; return <div style={{ backgroundColor, color, padding: '4px 8px', borderRadius: '4px', textAlign: 'center', display: 'inline-block', minWidth: '40px' }}>{value.toLocaleString('fr-FR', { maximumFractionDigits: 2 })}{suffix}</div>; };
+            const EmailTable = ({ headers, rows, footer }) => (<table style={EMAIL_STYLES.table} border={1} cellPadding={5} cellSpacing={0}><thead><tr>{headers.map((h, i) => <th key={i} style={EMAIL_STYLES.th}>{h}</th>)}</tr></thead><tbody>{rows.map((row, idx) => <tr key={idx}>{row.map((cell, cIdx) => <td key={cIdx} style={EMAIL_STYLES.td}>{cell}</td>)}</tr>)}</tbody>{footer && <tfoot><tr>{footer.map((f, i) => <td key={i} style={EMAIL_STYLES.footerTd}>{f}</td>)}</tr></tfoot>}</table>);
+            
+            const handleScreenshot = async () => { try { const element = document.getElementById('global-view-container'); if (!element) return; const dataUrl = await htmlToImage.toPng(element, { backgroundColor: '#ffffff', pixelRatio: 2 }); const link = document.createElement('a'); link.href = dataUrl; link.download = `Vigie_${selectedAgency}_${periodLabel}.png`; link.click(); } catch (e) { console.error(e); alert("Erreur capture."); } };
+            const handleCopyImage = async () => { try { const element = document.getElementById('global-view-container'); if (!element) return; const blob = await htmlToImage.toBlob(element, { backgroundColor: '#ffffff', pixelRatio: 2 }); if (blob) navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => { setShowToast(true); setTimeout(() => setShowToast(false), 3000); }); } catch (e) { console.error(e); alert("Erreur copie."); } };
+            const copyToClipboard = () => { const el = document.getElementById('email-view-content'); if (!el) { alert("Allez sur l'onglet Email."); setActiveTab('email'); return; } const range = document.createRange(); range.selectNode(el); window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range); document.execCommand('copy'); window.getSelection()?.removeAllRanges(); setShowToast(true); setTimeout(() => setShowToast(false), 3000); };
+            const collectRenderDiagnostics = () => { const container = document.getElementById('global-view-container'); const kpiCard = container?.querySelector('.dashboard-kpi-card'); const kpiValue = container?.querySelector('.kpi-value'); setVisualDiagnostics({ browser: { userAgent: navigator.userAgent, devicePixelRatio: window.devicePixelRatio, scrollY: window.scrollY, innerHeight: window.innerHeight }, container: container ? { width: container.offsetWidth, height: container.offsetHeight, offsetTop: container.offsetTop, rect: container.getBoundingClientRect() } : "Not Found" }); };
+
+            const Toast = ({ message, onClose }) => <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-4"><div className="bg-slate-800 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3"><div className="bg-green-500 rounded-full p-1"><Check size={14} className="text-white" /></div><span className="font-medium text-sm">{message}</span></div></div>;
+
+            return (
+                <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500">
+                    {showToast && <Toast message="Copié dans le presse-papier !" onClose={() => setShowToast(false)} />}
+                    {showDebug && <DebugPanel callDataRaw={callData} selectedAgency={selectedAgency} visualDiagnostics={visualDiagnostics} onClose={() => setShowDebug(false)} />}
+                    <button onClick={() => { collectRenderDiagnostics(); setShowDebug(true); }} className="fixed bottom-6 left-6 p-3 bg-white text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-full shadow-lg border border-slate-200 z-50 transition-colors" title="Diagnostic Technique"><Bug size={18} /></button>
+                    
+                    <div className="flex overflow-x-auto border-b border-slate-200 gap-1 bg-white rounded-t-xl px-2 pt-2 shadow-sm mt-4">
+                        <TabButton active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutGrid size={16}/>} label="Vue Globale" />
+                        {calls && <TabButton active={activeTab === 'appels'} onClick={() => setActiveTab('appels')} icon={<PhoneIncoming size={16}/>} label="Genesys (Appels)" theme="genesys" />}
+                        <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} icon={<BarChart2 size={16}/>} label="Synthèse TecNow" theme="tecnow" />
+                        <TabButton active={activeTab === 'techs'} onClick={() => setActiveTab('techs')} icon={<Users size={16}/>} label="Techniciens" theme="tecnow" />
+                        <TabButton active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} icon={<TrendingUp size={16}/>} label="Performance Agents" theme="danger" />
+                        <TabButton active={activeTab === 'email'} onClick={() => setActiveTab('email')} icon={<Mail size={16}/>} label="Email" />
+                    </div>
+
+                    <div className="bg-white rounded-b-xl rounded-tr-xl shadow-sm border border-slate-100 p-6 min-h-[400px]">
+                        {activeTab === 'dashboard' && (
+                            <div id="global-view-container" className="space-y-6 animate-in fade-in slide-in-from-bottom-2 bg-white p-4 rounded-xl">
+                                <div className="flex justify-between items-start border-b border-slate-100 pb-4 mb-2">
+                                    <div className="flex-1 text-center pl-20"><h2 className="text-2xl font-extrabold tracking-tight" style={{ color: getAgencyColor(selectedAgency) }}>{selectedAgency} - Etat de validation CR de {periodLabel}</h2></div>
+                                    <div className="flex items-center gap-2 shrink-0"><button onClick={handleCopyImage} className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600 transition-colors" title="Copier l'image"><ClipboardCheck size={20} /></button><button onClick={handleScreenshot} className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-800 transition-colors" title="Télécharger l'image"><Camera size={20} /></button></div>
+                                </div>
+                                {calls && (<div className="p-4 rounded-xl bg-orange-50/50 border border-orange-100 relative"><SectionHeader icon={<PhoneIncoming size={18} />} title="Performance Genesys" theme="genesys" /><div className="flex flex-wrap gap-3 mt-4"><DashboardKpi title="Appels Reçus" value={calls.offered.toString()} subtext="Flux Entrant" theme="genesys" /><DashboardKpi title="Appels Traités" value={calls.answered.toString()} subtext="Réponse" theme="genesys" /><DashboardKpi title="Appels Abandonnés" value={calls.abandoned.toString()} subtext="Perdus" theme="genesys" /><DashboardKpi title="Abandons Courts" value={calls.shortAbandoned.toString()} subtext="< 10s" theme="genesys" /><DashboardKpi title="QS" value={`${calls.qs.toFixed(1)}%`} subtext={qsLabel} theme="genesys" statusIndicator={qsIndicator} /><div className="w-full h-0 basis-full"></div><DashboardKpi title="QS Nette" value={`${calls.qsNet.toFixed(1)}%`} subtext={qsNetLabel} theme="genesys" statusIndicator={qsNetIndicator} /><DashboardKpi title="DMR" value={formatSeconds(calls.dmr)} subtext="Vitesse Moy." theme="genesys" /><DashboardKpi title="DMT" value={formatSeconds(calls.dmt)} subtext="Traitement" theme="genesys" /><DashboardKpi title="Temps Moyen MEA" value={formatSeconds(calls.mea)} subtext="Attente" theme="genesys" /></div></div>)}
+                                <div className="p-4 rounded-xl bg-emerald-50/30 border border-emerald-100">
+                                    <SectionHeader icon={<Wrench size={18} />} title="Performance TecNow" theme="tecnow" />
+                                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-8"><DashboardKpi title="Interventions" value={stats.totalInterventions.toString()} subtext="Total Validé" theme="tecnow" /><DashboardKpi title="Conformité (QS)" value={`${qualityService}%`} subtext="Taux OK" theme="tecnow" /><DashboardKpi title="Vol. Sans Contact" value={stats.byContact.withoutContact.toString()} subtext={`${percentSansContact}% du vol.`} theme="tecnow" /><DashboardKpi title="Nb Techs Sans Contact" value={stats.nbTechsWithSansContact.toString()} subtext="Concernés" theme="tecnow" /><DashboardKpi title="Vol. NC" value={stats.totalNC.toString()} subtext={`${percentNC}% du vol.`} theme="tecnow" /><DashboardKpi title="Nb Techs NC" value={stats.nbTechsWithNc.toString()} subtext="Concernés" theme="tecnow" /><DashboardKpi title="Vol. Corrections" value={stats.totalCorrections.toString()} subtext="Total COR" theme="tecnow" /><DashboardKpi title="Nb Techs Corrections" value={stats.nbTechsWithCorrection.toString()} subtext="Concernés" theme="tecnow" /></div>
+                                    <div className="space-y-6"><div className="bg-white border border-slate-200 rounded-xl shadow-sm p-5 flex flex-col h-auto min-h-[300px]"><div className="flex items-center justify-between mb-6"><h3 className="font-bold text-slate-800 flex items-center gap-2"><BarChart2 className="text-emerald-500" size={20}/> Répartition par Type d'Installation</h3><div className="text-xs font-bold text-emerald-700 bg-emerald-100 px-3 py-1 rounded-full">Total: {stats.totalInterventions}</div></div><div className="flex-1 w-full"><StackedHorizontalBarChart data={chartStackedData} /></div></div><div className="grid grid-cols-1 lg:grid-cols-2 gap-6"><div className="bg-white border border-slate-200 rounded-xl shadow-sm p-5 flex flex-col h-auto min-h-[350px]"><div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100"><h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><Phone size={16} className="text-orange-500" /> Top 10 : Sans Contact</h3></div><div className="flex-1">{stats.techSansContactStats.length > 0 ? stats.techSansContactStats.map((tech, idx) => <HorizontalBarRow key={tech.tech} rank={idx + 1} label={tech.tech} value={tech.targetCount} max={stats.techSansContactStats[0]?.targetCount || 0} colorClass="bg-orange-400" shadowClass="shadow-none" />) : <p className="text-slate-400 text-sm text-center py-10">Aucune donnée disponible</p>}</div></div><div className="bg-white border border-slate-200 rounded-xl shadow-sm p-5 flex flex-col h-auto min-h-[350px]"><div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100"><h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><AlertTriangle size={16} className="text-red-500" /> Top 10 : Non-Conformités (NC)</h3></div><div className="flex-1">{stats.techNcStats.length > 0 ? stats.techNcStats.map((tech, idx) => <HorizontalBarRow key={tech.tech} rank={idx + 1} label={tech.tech} value={tech.targetCount} max={stats.techNcStats[0]?.targetCount || 0} colorClass="bg-red-500" shadowClass="shadow-[0_0_10px_rgba(239,68,68,0.3)]" />) : <p className="text-slate-400 text-sm text-center py-10">Aucune NC détectée</p>}</div></div></div></div>
+                                </div>
+                                <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden mt-6"><div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between"><h3 className="font-bold text-slate-800 flex items-center gap-2"><CheckCircle size={18} className="text-slate-500"/> Détails NC détectées sur 'Sans Contact'</h3><div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 px-3 py-1 rounded-full font-medium border border-red-100"><AlertTriangle size={14} /> {stats.ncSansContactDetails.reduce((acc, curr) => acc + curr.countNC, 0)} NC à traiter</div></div><div className="p-0"><div className="overflow-x-auto"><table className="w-full text-sm text-left"><thead className="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200"><tr><th className="px-6 py-3">Technicien</th><th className="px-6 py-3">NC (Taux)</th><th className="px-6 py-3">Motifs Principaux</th><th className="px-6 py-3">OK (Taux)</th><th className="px-6 py-3">Total Sans Contact</th></tr></thead><tbody className="divide-y divide-slate-100">{stats.ncSansContactDetails.slice(0, 10).map((row, idx) => <tr key={idx} className="hover:bg-slate-50/50"><td className="px-6 py-3 font-medium text-slate-900">{row.tech}</td><td className="px-6 py-3"><span className="text-red-600 font-bold bg-red-50 px-2 py-1 rounded border border-red-100">{row.countNC} <span className="text-xs font-normal text-red-400">({row.rateNC.toFixed(1)}%)</span></span></td><td className="px-6 py-3 text-slate-500 italic truncate max-w-xs">{row.topReasons.join(', ') || '-'}</td><td className="px-6 py-3"><span className="text-slate-700">{row.countOK} <span className="text-xs text-slate-400">({row.rateOK.toFixed(1)}%)</span></span></td><td className="px-6 py-3 font-bold text-slate-800">{row.total}</td></tr>)}{stats.ncSansContactDetails.length === 0 && <tr><td colSpan={5} className="p-6 text-center text-slate-400">Aucune donnée disponible</td></tr>}</tbody></table></div></div></div>
+                                <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden mt-6"><div className="p-4 border-b border-slate-200 bg-red-50/50 flex items-center justify-between"><h3 className="font-bold text-slate-800 flex items-center gap-2"><AlertTriangle size={18} className="text-red-500"/> Top 5 Types de Non-Conformités (Tags)</h3></div><AnalysisTable title="" headers={['Tag / Type NC', 'Volume Total', 'Détails / Motifs']} rows={topTagNcRowsDashboard} /></div>
+                            </div>
+                        )}
+                        {activeTab === 'appels' && calls && <div className="animate-in fade-in slide-in-from-bottom-2"><div className="max-w-2xl mx-auto border-t-4 border-orange-500 rounded-lg shadow-sm"><AnalysisTable title={`Vigie Appel VCR ${calls.agency} (Genesys)`} headers={['Indicateur', 'Valeur']} rows={callRows} /></div></div>}
+                        {activeTab === 'overview' && <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2"><div className="grid grid-cols-1 lg:grid-cols-2 gap-8"><div className="col-span-1 lg:col-span-2 border-t-4 border-emerald-500 rounded-lg shadow-sm"><AnalysisTable title="Répartition par Type (TecNow)" headers={['Type', 'Avec Contact (Vol/%)', 'Sans Contact (Vol/%)', 'Total (Vol/%)']} rows={mergedInstallTypeRows} footer={mergedInstallTypeFooter} /></div></div><div className="border-t-4 border-emerald-500 rounded-lg shadow-sm"><AnalysisTable title="Corrections & Sauvetages" headers={['Type', 'Nb PND', 'Motifs PND', 'Nb APR', 'Motifs APR', 'Total COR']} rows={correctionRows} /></div></div>}
+                        {activeTab === 'techs' && <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2"><div className="grid grid-cols-1 lg:grid-cols-2 gap-8"><AnalysisTable title="Top 10 : Sans Contact" headers={['Technicien', 'Volume', 'Taux Indiv.', 'Taux Global']} rows={techSansContactRows} /><AnalysisTable title="Top 10 : Non-Conformités (NC)" headers={['Technicien', 'Volume NC', 'Taux Indiv.', 'Taux Global']} rows={techNcRows} /></div><div className="border-t-4 border-emerald-500 rounded-lg shadow-sm"><AnalysisTable title="Détails NC détectées sur 'Sans Contact'" headers={['Technicien', 'NC (Taux)', 'Motifs Principaux', 'OK (Taux)', 'Total Sans Contact']} rows={ncSansContactRows} /></div></div>}
+                        {activeTab === 'performance' && <div className="animate-in fade-in slide-in-from-bottom-2 space-y-8"><div className="border-t-4 border-amber-500 rounded-lg shadow-sm bg-white"><div className="flex items-center gap-2 p-4 bg-amber-50 text-amber-800 border-b border-amber-100"><TrendingUp size={20} /><div><h3 className="font-bold">Performance des Agents (Validateurs)</h3><p className="text-xs text-amber-700 opacity-80">Données consolidées (toutes agences confondues)</p></div></div><AnalysisTable title="Volume de traitement & Répartition" headers={perfHeaders} rows={perfRows} /></div><div className="border-t-4 border-slate-400 rounded-lg shadow-sm bg-white opacity-90"><div className="flex items-center gap-2 p-4 bg-slate-50 text-slate-700 border-b border-slate-200"><FileWarning size={20} /><h3 className="font-bold">Détails des Rejets / Erreurs de format</h3><p className="text-xs text-slate-500 ml-auto">Données brutes, agences confondues</p></div><AnalysisTable title="Lignes ignorées par le système" headers={['Validateur', 'Tag Absent', 'Tag Mal Placé', 'Ligne Vide', 'Total']} rows={ignoredRows} /></div></div>}
+                        {activeTab === 'email' && (
+                            <div className="animate-in fade-in slide-in-from-bottom-2">
+                                <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg mb-4 text-sm text-blue-800 flex justify-between items-center"><span><strong>Aperçu Email Optimisé :</strong> Copiez le contenu ci-dessous.</span><button onClick={copyToClipboard} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow-sm text-sm font-medium transition-all"><Copy size={16} /> Copier</button></div>
+                                <div id="email-view-content" style={{ fontFamily: 'Arial, sans-serif', color: '#1f2937', padding: '20px', backgroundColor: '#ffffff' }}>
+                                    <p style={{marginBottom: '10px'}}>Bonjour,</p><p style={{marginBottom: '10px'}}>Je partage avec vous l'état de validation de la <strong>{periodLabel}</strong> :</p>
+                                    <p style={{fontWeight: 'bold', marginTop: '20px', marginBottom: '10px', textDecoration: 'underline'}}>· Performance file d’attente :</p>
+                                    {calls ? (<div style={{maxWidth: '400px', marginBottom: '20px'}}><div style={{fontWeight: 'bold', padding: '8px', border: '1px solid #d1d5db', backgroundColor: '#f3f4f6', textAlign: 'center'}}>Vigie Appel VCR {calls.agency} de la {periodLabel}</div><table style={{...EMAIL_STYLES.table, width: '100%'}} border={1} cellPadding={5} cellSpacing={0}><tbody>{emailCallRows.map((row, idx) => <tr key={idx}><td style={{...EMAIL_STYLES.td, fontWeight: 'bold'}}>{row[0]}</td><td style={{...EMAIL_STYLES.td, textAlign: 'right'}}>{row[1]}</td></tr>)}</tbody></table></div>) : (<p style={{color: '#9ca3af', fontStyle: 'italic', fontSize: '12px'}}>[Données Genesys non disponibles]</p>)}
+                                    <p style={{fontWeight: 'bold', marginTop: '20px', marginBottom: '10px', textDecoration: 'underline'}}>· Nombre de CRs SANS CONTACT :</p><EmailTable headers={['Type d\'installation', 'Avec Contact', 'Sans Contact', 'Total général']} rows={Object.entries(stats.byInstallType).map(([type, counts]) => [type, counts.with, <EmailHeatmapCell value={counts.without} max={maxSansContactCount} isZeroGreen={true} />, counts.total])} footer={['Total', stats.byContact.withContact, <span style={{color: stats.byContact.withoutContact > 0 ? '#dc2626' : '#059669', fontWeight: 'bold'}}>{stats.byContact.withoutContact}</span>, stats.totalInterventions]} /><EmailTable headers={['Type d\'installation', 'Avec Contact', 'Sans Contact', 'Total général']} rows={Object.entries(stats.byInstallType).map(([type, counts]) => [type, `${((counts.with/totalGlobal)*100).toFixed(2)}%`, <span style={{color: counts.without > 0 ? '#dc2626' : '#059669', fontWeight: 'bold'}}>{`${((counts.without/totalGlobal)*100).toFixed(2)}%`}</span>, `${((counts.total/totalGlobal)*100).toFixed(2)}%`])} />
+                                    <p style={{fontWeight: 'bold', marginTop: '20px', marginBottom: '10px', textDecoration: 'underline'}}>· NC par TECH (SANS CONTACT) :</p><EmailTable headers={['Technicien', 'Nombre', 'Taux Individuel', 'Taux Global']} rows={stats.techSansContactStats.map(item => [item.tech, item.targetCount, `${item.individualRate.toFixed(2)}%`, <EmailHeatmapCell value={item.globalRate} max={maxGlobalRateSansContact} suffix="%" />])} />
+                                    <p style={{fontWeight: 'bold', marginTop: '20px', marginBottom: '10px', textDecoration: 'underline'}}>· NC par TECH :</p><EmailTable headers={['Technicien', 'Nombre NC', 'Taux Individuel', 'Taux Global']} rows={stats.techNcStats.map(item => [item.tech, item.targetCount, `${item.individualRate.toFixed(2)}%`, <EmailHeatmapCell value={item.globalRate} max={maxGlobalRateNc} suffix="%" />])} />
+                                    <p style={{fontWeight: 'bold', marginTop: '20px', marginBottom: '10px', textDecoration: 'underline'}}>· NC détectée par Tech / Sans Contact :</p><EmailTable headers={['Technicien', 'NC (Taux)', 'Motifs NC', 'OK (Taux)', 'Total Sans Contact']} rows={stats.ncSansContactDetails.filter(item => item.countNC > 0).map(item => [item.tech, <span style={{color: '#dc2626', fontWeight: 'bold'}}>{item.countNC} <span style={{fontSize: '11px', fontWeight: 'normal', color: '#000'}}>({item.rateNC.toFixed(1)}%)</span></span>, <span style={{fontSize: '11px', fontStyle: 'italic', color: '#4b5563'}}>{item.topReasons.join(', ') || '-'}</span>, `${item.countOK} (${item.rateOK.toFixed(1)}%)`, item.total])} />
+                                    <p style={{fontWeight: 'bold', marginTop: '20px', marginBottom: '10px', textDecoration: 'underline'}}>· Nombre de CR NC OK sauvé par la CA ou après retour de l'agence :</p><EmailTable headers={['Type d\'installation', 'Nb COR PND', 'Motifs PND', 'Nb COR APR', 'Motifs APR', 'Total COR']} rows={stats.correctionStats.map(item => [item.installType, item.countPnd, item.motifsPnd?.join(', ') || '-', item.countApr, item.motifsApr?.join(', ') || '-', item.totalCor])} />
+                                    <p style={{fontWeight: 'bold', marginTop: '20px', marginBottom: '10px', textDecoration: 'underline'}}>· TOP 5 Types de Non-Conformités (Tags) :</p><EmailTable headers={['Tag', 'Volume', 'Détails / Motifs']} rows={topTagNcRows.map(r => [r[0], r[1], r[2]?.join(', ') || '-'])} />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const HeaderUploadButton = ({ label, subLabel, icon, isLoading, isLoaded, theme, onFileSelect, accept = ".csv,.xlsx,.xls" }) => {
+            const fileInputRef = useRef(null);
+            const handleClick = () => fileInputRef.current?.click();
+            const handleChange = (e) => {
+                if (e.target.files && e.target.files[0]) {
+                    onFileSelect(e.target.files[0]);
+                    e.target.value = '';
+                }
+            };
+            const themeClasses = {
+                tecnow: { base: "bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100 hover:border-emerald-300", loaded: "bg-white border-emerald-500 text-emerald-700 shadow-sm ring-1 ring-emerald-100", iconBg: "bg-emerald-200 text-emerald-800" },
+                genesys: { base: "bg-orange-50 border-orange-200 text-orange-800 hover:bg-orange-100 hover:border-orange-300", loaded: "bg-white border-orange-500 text-orange-700 shadow-sm ring-1 ring-orange-100", iconBg: "bg-orange-200 text-orange-800" }
+            };
+            const styles = themeClasses[theme];
+            return (
+                <div className="relative group">
+                    <input type="file" ref={fileInputRef} className="hidden" accept={accept} onChange={handleChange} disabled={isLoading} />
+                    <button onClick={handleClick} disabled={isLoading} className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-all border ${isLoaded ? styles.loaded : styles.base} ${isLoading ? 'cursor-wait opacity-70' : ''}`}>
+                        {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : isLoaded ? <div className="bg-green-100 p-1 rounded-full"><CheckCircle2 className="w-3 h-3 text-green-700" /></div> : <div className={`p-1.5 rounded-md ${styles.iconBg}`}>{icon}</div>}
+                        <div className="flex flex-col items-start leading-tight"><span className="font-bold">{label}</span>{subLabel && <span className="text-[10px] opacity-80 font-normal">{subLabel}</span>}</div>
+                    </button>
+                </div>
+            );
+        };
+
+        const FeatureCard = ({ icon, title, desc }) => (
+            <div className="flex flex-col items-center text-center p-6 bg-white rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow group">
+                <div className="mb-4 p-4 bg-slate-50 rounded-2xl group-hover:scale-110 transition-transform duration-300">{icon}</div>
+                <h3 className="font-bold text-slate-800 text-lg mb-2">{title}</h3>
+                <p className="text-sm text-slate-500 leading-relaxed">{desc}</p>
+            </div>
+        );
+
+        function App() {
+            const [interventionData, setInterventionData] = useState(null);
+            const [callData, setCallData] = useState(null);
+            const [isLoadingInt, setIsLoadingInt] = useState(false);
+            const [isLoadingCall, setIsLoadingCall] = useState(false);
+            const [error, setError] = useState(null);
+            const [selectedAgency, setSelectedAgency] = useState('');
+
+            const agencies = useMemo(() => {
+                if (!interventionData) return [];
+                return Array.from(new Set(interventionData.map(i => i.agency))).sort();
+            }, [interventionData]);
+
+            useEffect(() => {
+                if (agencies.length > 0 && !selectedAgency) setSelectedAgency(agencies[0]);
+            }, [agencies, selectedAgency]);
+
+            const handleInterventionFile = async (file) => {
+                setIsLoadingInt(true); setError(null);
+                try {
+                    const rawData = await parseFile(file);
+                    const normalized = normalizeData(rawData);
+                    if (normalized.length === 0) setError("Le fichier interventions semble vide ou invalide.");
+                    else { setInterventionData(normalized); setSelectedAgency(''); }
+                } catch (err) { console.error(err); setError("Erreur lecture fichier Interventions."); } finally { setIsLoadingInt(false); }
+            };
+
+            const handleCallFile = async (file) => {
+                setIsLoadingCall(true); setError(null);
+                try { const rawData = await parseFile(file); setCallData(rawData); } catch (err) { console.error(err); setError("Erreur lecture fichier Appels (optionnel)."); } finally { setIsLoadingCall(false); }
+            };
+
+            const handleExport = () => {
+                if (!interventionData || !selectedAgency) return;
+                const filteredData = interventionData.filter(i => i.agency === selectedAgency);
+                const exportData = filteredData.map(item => ({ ...item.originalRow, ...item.extractedFields }));
+                const worksheet = XLSX.utils.json_to_sheet(exportData);
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, "Extraction_Vigie");
+                XLSX.writeFile(workbook, `Vigie_S${filteredData[0]?.week || 0}_${selectedAgency}.xlsx`);
+            };
+
+            const handleExportGlobal = () => {
+                if (!interventionData) return;
+                const exportData = interventionData.map(item => ({ ...item.originalRow, ...item.extractedFields }));
+                const worksheet = XLSX.utils.json_to_sheet(exportData);
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, "Extraction_Globale");
+                const week = interventionData[0]?.week || 0;
+                XLSX.writeFile(workbook, `Vigie_S${week}_GLOBAL.xlsx`);
+            };
+
+            const reset = () => { setInterventionData(null); setCallData(null); setError(null); setSelectedAgency(''); };
+            const showDashboard = interventionData !== null;
+
+            return (
+                <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-emerald-100 selection:text-emerald-900">
+                    <nav className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                            <div className="flex items-center justify-between h-20">
+                                <div className="flex items-center gap-3 shrink-0">
+                                    <div className="bg-slate-800 p-2 rounded-lg shadow-sm cursor-pointer hover:bg-slate-700 transition-colors" onClick={reset}><LayoutDashboard className="h-6 w-6 text-white" /></div>
+                                    <div className="flex flex-col mr-6"><span className="font-extrabold text-xl tracking-tight text-slate-800 leading-none">Vigie<span className="text-emerald-600">VCR</span></span><span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">RACC BYTEL</span></div>
+                                </div>
+                                {showDashboard && (
+                                    <div className="flex-1 flex items-center justify-center gap-4 overflow-x-auto px-4 scrollbar-none">
+                                        <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-xl border border-slate-200">{agencies.map(agency => {
+                                            const color = getAgencyColor(agency); const isSelected = selectedAgency === agency;
+                                            return <button key={agency} onClick={() => setSelectedAgency(agency)} style={{ backgroundColor: isSelected ? color : '#ffffff', color: isSelected ? '#ffffff' : color, borderColor: color }} className={`px-5 py-2 rounded-lg text-sm font-bold border-2 transition-all duration-200 whitespace-nowrap ${isSelected ? 'shadow-md scale-105' : 'hover:bg-slate-50 opacity-70 hover:opacity-100 hover:scale-105'}`}>{agency}</button>;
+                                        })}</div>
+                                        <div className="flex items-center gap-2">
+                                            <button onClick={handleExport} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 rounded-lg shadow-sm text-sm font-medium transition-all whitespace-nowrap" title="Export Agence Sélectionnée"><Download size={16} /> <span className="hidden lg:inline">Export {selectedAgency}</span></button>
+                                            <button onClick={handleExportGlobal} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg shadow-sm text-sm font-medium transition-all whitespace-nowrap" title="Export Global (Toutes Agences)"><FileSpreadsheet size={16} /> <span className="hidden lg:inline">Export Global</span></button>
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="flex items-center gap-4 shrink-0">
+                                    <HeaderUploadButton label="Interventions" subLabel="TecNow" icon={<FileSpreadsheet className="w-4 h-4" />} isLoading={isLoadingInt} isLoaded={!!interventionData} theme="tecnow" onFileSelect={handleInterventionFile} />
+                                    <div className="h-8 w-px bg-slate-200 hidden sm:block"></div>
+                                    <HeaderUploadButton label="Appels" subLabel="Genesys" icon={<PhoneIncoming className="w-4 h-4" />} isLoading={isLoadingCall} isLoaded={!!callData} theme="genesys" onFileSelect={handleCallFile} />
+                                </div>
+                            </div>
+                        </div>
+                    </nav>
+                    <main className="py-8 px-4 sm:px-6">
+                        {error && (<div className="max-w-7xl mx-auto mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg flex items-start gap-3 shadow-sm animate-in slide-in-from-top-2"><div className="mt-0.5"><AlertTriangle className="w-5 h-5" /></div><div><p className="font-bold">Erreur de chargement</p><p className="text-sm opacity-90">{error}</p></div><button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-600">✕</button></div>)}
+                        {!showDashboard ? (
+                            <div className="max-w-5xl mx-auto animate-in fade-in duration-500">
+                                <div className="text-center mb-16 mt-12"><div className="inline-flex items-center justify-center p-3 bg-white rounded-2xl shadow-sm border border-slate-100 mb-6"><Database className="w-8 h-8 text-slate-400" /></div><h1 className="text-4xl md:text-5xl font-extrabold text-slate-900 mb-6 tracking-tight">Analyse & Validation <span className="text-emerald-600">Centralisée</span></h1><p className="text-lg text-slate-600 max-w-2xl mx-auto leading-relaxed">Consolidez vos données <strong>TecNow</strong> et <strong>Genesys</strong> en un seul tableau de bord interactif pour piloter la performance de vos agences.</p></div>
+                                <div className="mt-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8"><FeatureCard icon={<FileUp className="text-blue-500"/>} title="Import Multi-Sources" desc="Compatible avec les exports TecNow (ServiceNow) et les statistiques de files d'attente Genesys." /><FeatureCard icon={<ShieldCheck className="text-emerald-500" />} title="Audit Qualité TecNow" desc="Détection automatique des NC déclarées (Sans Contact) et analyse des motifs de rejet." /><FeatureCard icon={<PhoneIncoming className="text-orange-500" />} title="KPIs Genesys" desc="Visualisation immédiate de la QS, QS Nette, DMR et abandons par file." /></div>
+                            </div>
+                        ) : <Dashboard data={interventionData} callData={callData} selectedAgency={selectedAgency} onBack={reset} />}
+                    </main>
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
